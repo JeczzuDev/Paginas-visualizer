@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timer Centrado</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="timer-container">
+        <div id="timer" class="timer-text">00:00</div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>
+<style>
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        background-color: transparent;
+        background: transparent;
+    }
+    
+    body {
+        height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        /* Fondo oscuro para facilitar eliminar en OBS */
+        font-family: 'Arial', sans-serif;
+        /* Fuente moderna y simple */
+    }
+
+    .timer-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100%;
+        width: 100%;
+        /* background-color: #1a1a1a; */
+    }
+
+    .timer-text {
+        font-weight: bolder;
+        font-size: 120px;
+        color: white;
+        text-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        border: 4px solid rgba(0, 0, 0, 0.6);
+        /* Borde del texto */
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+    }
+</style>
+<script>
+    let minutes = 15; // Cambia esta variable según el tiempo en minutos que quieras mostrar
+    let seconds = minutes * 60; // Se convierte a segundos
+
+    const timerElement = document.getElementById("timer");
+
+    function startTimer() {
+        setInterval(() => {
+            let min = Math.floor(seconds / 60);
+            let sec = seconds % 60;
+
+            // Formatear el texto para mostrar dos dígitos en minutos y segundos
+            timerElement.innerText = `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+
+            // Decrementar el tiempo
+            if (seconds > 0) {
+                seconds--;
+            } else {
+                clearInterval(); // Detener el temporizador cuando llegue a cero
+            }
+        }, 1000);
+    }
+
+    // Comenzar el temporizador
+    startTimer();
+
+</script>
