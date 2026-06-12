@@ -1,0 +1,141 @@
+<!--
+- FIFA World Cup 26 transition for OBS Browser Transition plugin
+- Shapes grow from corners to cover screen, then shrink back (infinite loop)
+- No opacity fades — only scale growth/shrink
+- Total cycle: ~3.2s (longest animation)
+- Use this time in OBS Browser Transition plugin settings
+-->
+
+<svg preserveAspectRatio="xMidYMid slice" viewBox="10 10 80 80" style="background: transparent;">
+    <defs>
+        <style>
+            * {
+                box-sizing: border-box;
+                padding: 0;
+                margin: 0;
+            }
+
+            svg {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100vh;
+                transform: scaleX(-1);
+            }
+
+            /* Initial state: shapes are hidden (scaled to 0) before animation starts */
+            path {
+                transform: scale(0);
+            }
+
+            /* Dark blue (top-out): fast grow + rotation */
+            @keyframes grow-top-out {
+                0% {
+                    transform: scale(0) rotate(0deg);
+                }
+                22% {
+                    transform: scale(1) rotate(45deg);
+                }
+                55% {
+                    transform: scale(2.8) rotate(180deg);
+                }
+                100% {
+                    transform: scale(0) rotate(360deg);
+                }
+            }
+
+            /* Light blue (top-in): medium grow + rotation */
+            @keyframes grow-top-in {
+                0% {
+                    transform: scale(0) rotate(0deg);
+                }
+                28% {
+                    transform: scale(1) rotate(30deg);
+                }
+                62% {
+                    transform: scale(2.3) rotate(150deg);
+                }
+                100% {
+                    transform: scale(0) rotate(360deg);
+                }
+            }
+
+            /* Green (bottom-out): slower grow + rotation */
+            @keyframes grow-bottom-out {
+                0% {
+                    transform: scale(0) rotate(0deg);
+                }
+                25% {
+                    transform: scale(1) rotate(60deg);
+                }
+                58% {
+                    transform: scale(3) rotate(200deg);
+                }
+                100% {
+                    transform: scale(0) rotate(360deg);
+                }
+            }
+
+            /* Red (bottom-in): slower grow + rotation */
+            @keyframes grow-bottom-in {
+                0% {
+                    transform: scale(0) rotate(0deg);
+                }
+                30% {
+                    transform: scale(1) rotate(20deg);
+                }
+                65% {
+                    transform: scale(2.6) rotate(160deg);
+                }
+                100% {
+                    transform: scale(0) rotate(360deg);
+                }
+            }
+
+            /* Top-out (dark blue): fast growth, large scale, rotating */
+            .shape-top-out {
+                animation: grow-top-out 3s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+                animation-delay: 0.5s;
+                transform-origin: 13px 25px;
+            }
+
+            /* Top-in (light blue): medium growth, medium scale, rotating */
+            .shape-top-in {
+                animation: grow-top-in 2.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+                animation-delay: 0.6s;
+                transform-origin: 13px 25px;
+            }
+
+            /* Bottom-out (green): slower growth, largest scale, rotating */
+            .shape-bottom-out {
+                animation: grow-bottom-out 3.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+                animation-delay: 0.55s;
+                transform-origin: 84px 93px;
+            }
+
+            /* Bottom-in (red): slower growth, medium-large scale, rotating */
+            .shape-bottom-in {
+                animation: grow-bottom-in 2.9s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+                animation-delay: 0.65s;
+                transform-origin: 84px 93px;
+            }
+        </style>
+    </defs>
+
+    <!-- Top-left shape (dark blue) - grows from top-left corner -->
+    <path fill="#2A398D" class="shape-top-out"
+        d="M37-5C25.1-14.7,5.7-19.1-9.2-10-28.5,1.8-32.7,31.1-19.8,49c15.5,21.5,52.6,22,67.2,2.3C59.4,35,53.7,8.5,37-5Z" />
+
+    <!-- Inner-top shape (light gray) - grows from top-left, slightly different timing -->
+    <path fill="#D1D4D1" class="shape-top-in"
+        d="M20.6,4.1C11.6,1.5-1.9,2.5-8,11.2-16.3,23.1-8.2,45.6,7.4,50S42.1,38.9,41,24.5C40.2,14.1,29.4,6.6,20.6,4.1Z" />
+
+    <!-- Bottom-right shape (green) - grows from bottom-right corner -->
+    <path fill="#3CAC3B" class="shape-bottom-out"
+        d="M105.9,48.6c-12.4-8.2-29.3-4.8-39.4.8-23.4,12.8-37.7,51.9-19.1,74.1s63.9,15.3,76-5.6c7.6-13.3,1.8-31.1-2.3-43.8C117.6,63.3,114.7,54.3,105.9,48.6Z" />
+
+    <!-- Inner-bottom shape (red) - grows from bottom-right, different timing -->
+    <path fill="#E61D25" class="shape-bottom-in"
+        d="M102,67.1c-9.6-6.1-22-3.1-29.5,2-15.4,10.7-19.6,37.5-7.6,47.8s35.9,3.9,44.5-12.5C115.5,92.6,113.9,74.6,102,67.1Z" />
+</svg>
