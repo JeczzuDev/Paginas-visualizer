@@ -1,7 +1,7 @@
 <!--
 - FIFA World Cup 26 transition for OBS Browser Transition plugin
-- Shapes grow from corners to cover screen, then shrink back (infinite loop)
-- No opacity fades — only scale growth/shrink
+- Shapes grow in from their corner, then slide out toward the OPPOSITE corner
+- No opacity fades and no rotation — only scale growth + diagonal slide-out
 - Total cycle: ~3.2s (longest animation)
 - Use this time in OBS Browser Transition plugin settings
 -->
@@ -29,204 +29,203 @@
                 transform: scale(0);
             }
 
-            /* Dark blue (top-out): fast grow + rotation */
+            /*
+             * Exit direction: top-group shapes grow in at the top-left corner
+             * and slide out toward the bottom-right (+x, +y); bottom-group shapes
+             * grow in at the bottom-right corner and slide out toward the
+             * top-left (-x, -y). The shape translates while still large, then
+             * shrinks at the far corner. No rotation.
+             */
+
+            /* top-out: fast grow, slide out toward bottom-right, ease down */
             @keyframes grow-top-out {
-                0% {
-                    transform: scale(0) rotate(0deg);
-                }
-                22% {
-                    transform: scale(1) rotate(45deg);
-                }
-                55% {
-                    transform: scale(2.8) rotate(180deg);
-                }
-                100% {
-                    transform: scale(0) rotate(360deg);
-                }
+                0%   { transform: translate(0, 0) scale(0) rotate(0deg); }
+                22%  { transform: translate(0, 0) scale(1) rotate(45deg); }
+                55%  { transform: translate(0, 0) scale(2.8) rotate(180deg); }
+                78%  { transform: translate(45px, 45px) scale(2.2) rotate(280deg); }
+                92%  { transform: translate(80px, 80px) scale(0.9) rotate(340deg); }
+                100% { transform: translate(95px, 95px) scale(0) rotate(360deg); }
             }
 
-            /* Light blue (top-in): medium grow + rotation */
+            /* top-in: medium grow, slide out toward bottom-right, ease down */
             @keyframes grow-top-in {
-                0% {
-                    transform: scale(0) rotate(0deg);
-                }
-                28% {
-                    transform: scale(1) rotate(30deg);
-                }
-                62% {
-                    transform: scale(2.3) rotate(150deg);
-                }
-                100% {
-                    transform: scale(0) rotate(360deg);
-                }
+                0%   { transform: translate(0, 0) scale(0) rotate(0deg); }
+                28%  { transform: translate(0, 0) scale(1) rotate(30deg); }
+                62%  { transform: translate(0, 0) scale(2.3) rotate(150deg); }
+                80%  { transform: translate(45px, 45px) scale(1.8) rotate(260deg); }
+                92%  { transform: translate(80px, 80px) scale(0.8) rotate(330deg); }
+                100% { transform: translate(95px, 95px) scale(0) rotate(360deg); }
             }
 
-            /* Green (bottom-out): slower grow + rotation */
+            /* bottom-out: grow, then fast slide out toward top-left, ease down */
             @keyframes grow-bottom-out {
-                0% {
-                    transform: scale(0) rotate(0deg);
-                }
-                25% {
-                    transform: scale(1) rotate(60deg);
-                }
-                58% {
-                    transform: scale(3) rotate(200deg);
-                }
-                100% {
-                    transform: scale(0) rotate(360deg);
-                }
+                0%   { transform: translate(0, 0) scale(0) rotate(0deg); }
+                25%  { transform: translate(0, 0) scale(1) rotate(60deg); }
+                48%  { transform: translate(0, 0) scale(3) rotate(200deg); }
+                62%  { transform: translate(-45px, -45px) scale(2.3) rotate(280deg); }
+                72%  { transform: translate(-80px, -80px) scale(1) rotate(330deg); }
+                82%  { transform: translate(-95px, -95px) scale(0) rotate(360deg); }
+                100% { transform: translate(-95px, -95px) scale(0) rotate(360deg); }
             }
 
-            /* Red (bottom-in): slower grow + rotation */
+            /* bottom-in: grow, then fast slide out toward top-left, ease down */
             @keyframes grow-bottom-in {
-                0% {
-                    transform: scale(0) rotate(0deg);
-                }
-                30% {
-                    transform: scale(1) rotate(20deg);
-                }
-                65% {
-                    transform: scale(2.6) rotate(160deg);
-                }
-                100% {
-                    transform: scale(0) rotate(360deg);
-                }
+                0%   { transform: translate(0, 0) scale(0) rotate(0deg); }
+                30%  { transform: translate(0, 0) scale(1) rotate(20deg); }
+                52%  { transform: translate(0, 0) scale(2.6) rotate(160deg); }
+                64%  { transform: translate(-45px, -45px) scale(2.0) rotate(250deg); }
+                74%  { transform: translate(-80px, -80px) scale(0.9) rotate(320deg); }
+                84%  { transform: translate(-95px, -95px) scale(0) rotate(360deg); }
+                100% { transform: translate(-95px, -95px) scale(0) rotate(360deg); }
             }
 
-            /* Top group: Yellow */
+            /* top-mid-1: grow, slide out toward bottom-right, ease down */
             @keyframes grow-top-mid-1 {
-                0% {
-                    transform: scale(0) rotate(0deg);
-                }
-                32% {
-                    transform: scale(1) rotate(35deg);
-                }
-                67% {
-                    transform: scale(2.2) rotate(155deg);
-                }
-                100% {
-                    transform: scale(0) rotate(360deg);
-                }
+                0%   { transform: translate(0, 0) scale(0) rotate(0deg); }
+                32%  { transform: translate(0, 0) scale(1) rotate(35deg); }
+                67%  { transform: translate(0, 0) scale(2.2) rotate(155deg); }
+                83%  { transform: translate(45px, 45px) scale(1.7) rotate(270deg); }
+                93%  { transform: translate(80px, 80px) scale(0.7) rotate(335deg); }
+                100% { transform: translate(95px, 95px) scale(0) rotate(360deg); }
             }
 
-            /* Top group: Orange-Red */
+            /* top-mid-2: grow, slide out toward bottom-right, ease down */
             @keyframes grow-top-mid-2 {
-                0% {
-                    transform: scale(0) rotate(0deg);
-                }
-                34% {
-                    transform: scale(1) rotate(25deg);
-                }
-                68% {
-                    transform: scale(2.1) rotate(145deg);
-                }
-                100% {
-                    transform: scale(0) rotate(360deg);
-                }
+                0%   { transform: translate(0, 0) scale(0) rotate(0deg); }
+                34%  { transform: translate(0, 0) scale(1) rotate(25deg); }
+                68%  { transform: translate(0, 0) scale(2.1) rotate(145deg); }
+                84%  { transform: translate(45px, 45px) scale(1.6) rotate(265deg); }
+                93%  { transform: translate(80px, 80px) scale(0.7) rotate(335deg); }
+                100% { transform: translate(95px, 95px) scale(0) rotate(360deg); }
             }
 
-            /* Top group: Red */
+            /* top-mid-3: grow, slide out toward bottom-right, ease down */
             @keyframes grow-top-mid-3 {
-                0% {
-                    transform: scale(0) rotate(0deg);
-                }
-                36% {
-                    transform: scale(1) rotate(15deg);
-                }
-                70% {
-                    transform: scale(2.0) rotate(140deg);
-                }
-                100% {
-                    transform: scale(0) rotate(360deg);
-                }
+                0%   { transform: translate(0, 0) scale(0) rotate(0deg); }
+                36%  { transform: translate(0, 0) scale(1) rotate(15deg); }
+                70%  { transform: translate(0, 0) scale(2.0) rotate(140deg); }
+                85%  { transform: translate(45px, 45px) scale(1.5) rotate(260deg); }
+                94%  { transform: translate(80px, 80px) scale(0.6) rotate(335deg); }
+                100% { transform: translate(95px, 95px) scale(0) rotate(360deg); }
             }
 
-            /* Top group: Dark Red */
+            /* top-mid-4: grow, slide out toward bottom-right, ease down */
             @keyframes grow-top-mid-4 {
-                0% {
-                    transform: scale(0) rotate(0deg);
-                }
-                38% {
-                    transform: scale(1) rotate(10deg);
-                }
-                72% {
-                    transform: scale(1.9) rotate(135deg);
-                }
-                100% {
-                    transform: scale(0) rotate(360deg);
-                }
+                0%   { transform: translate(0, 0) scale(0) rotate(0deg); }
+                38%  { transform: translate(0, 0) scale(1) rotate(10deg); }
+                72%  { transform: translate(0, 0) scale(1.9) rotate(135deg); }
+                86%  { transform: translate(45px, 45px) scale(1.4) rotate(255deg); }
+                94%  { transform: translate(80px, 80px) scale(0.6) rotate(335deg); }
+                100% { transform: translate(95px, 95px) scale(0) rotate(360deg); }
             }
 
-            /* Bottom group: Light Blue */
+            /* mid-1: grow, then fast slide out toward top-left, ease down */
             @keyframes grow-mid-1 {
-                0% {
-                    transform: scale(0) rotate(0deg);
-                }
-                31% {
-                    transform: scale(1) rotate(40deg);
-                }
-                64% {
-                    transform: scale(2.4) rotate(170deg);
-                }
-                100% {
-                    transform: scale(0) rotate(360deg);
-                }
+                0%   { transform: translate(0, 0) scale(0) rotate(0deg); }
+                31%  { transform: translate(0, 0) scale(1) rotate(40deg); }
+                52%  { transform: translate(0, 0) scale(2.4) rotate(170deg); }
+                64%  { transform: translate(-45px, -45px) scale(1.9) rotate(260deg); }
+                73%  { transform: translate(-80px, -80px) scale(0.8) rotate(330deg); }
+                82%  { transform: translate(-95px, -95px) scale(0) rotate(360deg); }
+                100% { transform: translate(-95px, -95px) scale(0) rotate(360deg); }
             }
 
-            /* Bottom group: Dark Red */
+            /* mid-2: grow, then fast slide out toward top-left, ease down */
             @keyframes grow-mid-2 {
-                0% {
-                    transform: scale(0) rotate(0deg);
-                }
-                33% {
-                    transform: scale(1) rotate(30deg);
-                }
-                66% {
-                    transform: scale(2.2) rotate(160deg);
-                }
-                100% {
-                    transform: scale(0) rotate(360deg);
-                }
+                0%   { transform: translate(0, 0) scale(0) rotate(0deg); }
+                33%  { transform: translate(0, 0) scale(1) rotate(30deg); }
+                54%  { transform: translate(0, 0) scale(2.2) rotate(160deg); }
+                66%  { transform: translate(-45px, -45px) scale(1.7) rotate(255deg); }
+                74%  { transform: translate(-80px, -80px) scale(0.7) rotate(325deg); }
+                83%  { transform: translate(-95px, -95px) scale(0) rotate(360deg); }
+                100% { transform: translate(-95px, -95px) scale(0) rotate(360deg); }
             }
 
-            /* Bottom group: Orange-Red */
+            /* mid-4: grow, then fast slide out toward top-left, ease down */
             @keyframes grow-mid-4 {
-                0% {
-                    transform: scale(0) rotate(0deg);
-                }
-                39% {
-                    transform: scale(1) rotate(5deg);
-                }
-                74% {
-                    transform: scale(1.8) rotate(130deg);
-                }
-                100% {
-                    transform: scale(0) rotate(360deg);
-                }
+                0%   { transform: translate(0, 0) scale(0) rotate(0deg); }
+                39%  { transform: translate(0, 0) scale(1) rotate(5deg); }
+                58%  { transform: translate(0, 0) scale(1.8) rotate(130deg); }
+                70%  { transform: translate(-45px, -45px) scale(1.4) rotate(245deg); }
+                78%  { transform: translate(-80px, -80px) scale(0.6) rotate(320deg); }
+                86%  { transform: translate(-95px, -95px) scale(0) rotate(360deg); }
+                100% { transform: translate(-95px, -95px) scale(0) rotate(360deg); }
             }
 
-            /* Top-out (dark blue): fast growth, large scale, rotating */
+            /* top-mid-5: grow, slide out toward bottom-right, ease down */
+            @keyframes grow-top-mid-5 {
+                0%   { transform: translate(0, 0) scale(0) rotate(0deg); }
+                40%  { transform: translate(0, 0) scale(1) rotate(8deg); }
+                73%  { transform: translate(0, 0) scale(1.7) rotate(125deg); }
+                86%  { transform: translate(45px, 45px) scale(1.3) rotate(250deg); }
+                94%  { transform: translate(80px, 80px) scale(0.5) rotate(335deg); }
+                100% { transform: translate(95px, 95px) scale(0) rotate(360deg); }
+            }
+
+            /* top-mid-6: grow, slide out toward bottom-right, ease down */
+            @keyframes grow-top-mid-6 {
+                0%   { transform: translate(0, 0) scale(0) rotate(0deg); }
+                42%  { transform: translate(0, 0) scale(1) rotate(4deg); }
+                75%  { transform: translate(0, 0) scale(1.6) rotate(120deg); }
+                87%  { transform: translate(45px, 45px) scale(1.2) rotate(248deg); }
+                95%  { transform: translate(80px, 80px) scale(0.5) rotate(335deg); }
+                100% { transform: translate(95px, 95px) scale(0) rotate(360deg); }
+            }
+
+            /* top-mid-7: grow, slide out toward bottom-right, ease down */
+            @keyframes grow-top-mid-7 {
+                0%   { transform: translate(0, 0) scale(0) rotate(0deg); }
+                44%  { transform: translate(0, 0) scale(1) rotate(2deg); }
+                77%  { transform: translate(0, 0) scale(1.5) rotate(115deg); }
+                88%  { transform: translate(45px, 45px) scale(1.1) rotate(245deg); }
+                95%  { transform: translate(80px, 80px) scale(0.4) rotate(335deg); }
+                100% { transform: translate(95px, 95px) scale(0) rotate(360deg); }
+            }
+
+            /* mid-5: grow, then fast slide out toward top-left, ease down */
+            @keyframes grow-mid-5 {
+                0%   { transform: translate(0, 0) scale(0) rotate(0deg); }
+                41%  { transform: translate(0, 0) scale(1) rotate(6deg); }
+                60%  { transform: translate(0, 0) scale(1.7) rotate(125deg); }
+                72%  { transform: translate(-45px, -45px) scale(1.3) rotate(248deg); }
+                79%  { transform: translate(-80px, -80px) scale(0.5) rotate(325deg); }
+                87%  { transform: translate(-95px, -95px) scale(0) rotate(360deg); }
+                100% { transform: translate(-95px, -95px) scale(0) rotate(360deg); }
+            }
+
+            /* mid-6: grow, then fast slide out toward top-left, ease down */
+            @keyframes grow-mid-6 {
+                0%   { transform: translate(0, 0) scale(0) rotate(0deg); }
+                43%  { transform: translate(0, 0) scale(1) rotate(3deg); }
+                62%  { transform: translate(0, 0) scale(1.6) rotate(120deg); }
+                74%  { transform: translate(-45px, -45px) scale(1.2) rotate(245deg); }
+                81%  { transform: translate(-80px, -80px) scale(0.4) rotate(325deg); }
+                88%  { transform: translate(-95px, -95px) scale(0) rotate(360deg); }
+                100% { transform: translate(-95px, -95px) scale(0) rotate(360deg); }
+            }
+
+            /* Top-out: fast growth, large scale */
             .shape-top-out {
                 animation: grow-top-out 3s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
                 animation-delay: 0.5s;
                 transform-origin: 13px 25px;
             }
 
-            /* Top-in (light blue): medium growth, medium scale, rotating */
+            /* Top-in: medium growth, medium scale */
             .shape-top-in {
                 animation: grow-top-in 2.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
                 animation-delay: 0.6s;
                 transform-origin: 13px 25px;
             }
 
-            /* Bottom-out (green): slower growth, largest scale, rotating */
+            /* Bottom-out: slower growth, largest scale */
             .shape-bottom-out {
                 animation: grow-bottom-out 3.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
                 animation-delay: 0.55s;
                 transform-origin: 84px 93px;
             }
 
-            /* Bottom-in (red): slower growth, medium-large scale, rotating */
+            /* Bottom-in: slower growth, medium-large scale */
             .shape-bottom-in {
                 animation: grow-bottom-in 2.9s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
                 animation-delay: 0.65s;
@@ -276,52 +275,93 @@
                 animation-delay: 0.9s;
                 transform-origin: 84px 93px;
             }
+
+            /* Top group extra shapes */
+            .shape-top-mid-5 {
+                animation: grow-top-mid-5 2.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+                animation-delay: 0.9s;
+                transform-origin: 13px 25px;
+            }
+
+            .shape-top-mid-6 {
+                animation: grow-top-mid-6 2.75s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+                animation-delay: 0.95s;
+                transform-origin: 13px 25px;
+            }
+
+            .shape-top-mid-7 {
+                animation: grow-top-mid-7 2.7s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+                animation-delay: 1s;
+                transform-origin: 13px 25px;
+            }
+
+            /* Bottom group extra shapes */
+            .shape-mid-5 {
+                animation: grow-mid-5 2.9s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+                animation-delay: 0.95s;
+                transform-origin: 84px 93px;
+            }
+
+            .shape-mid-6 {
+                animation: grow-mid-6 2.85s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+                animation-delay: 1s;
+                transform-origin: 84px 93px;
+            }
         </style>
     </defs>
 
-    <!-- Top-left shape (dark blue) - grows from top-left corner -->
-    <path fill="#2A398D" class="shape-top-out"
+    <!-- Top-left outer shape - grows from top-left corner -->
+    <path fill="#00C752" class="shape-top-out"
         d="M37-5C25.1-14.7,5.7-19.1-9.2-10-28.5,1.8-32.7,31.1-19.8,49c15.5,21.5,52.6,22,67.2,2.3C59.4,35,53.7,8.5,37-5Z" />
 
-    <!-- Inner-top shape (medium blue) - grows from top-left, slightly different timing -->
-    <path fill="#4A5FBD" class="shape-top-in"
+    <!-- Inner-top shape - grows from top-left, slightly different timing -->
+    <path fill="#304FFF" class="shape-top-in"
         d="M20.6,4.1C11.6,1.5-1.9,2.5-8,11.2-16.3,23.1-8.2,45.6,7.4,50S42.1,38.9,41,24.5C40.2,14.1,29.4,6.6,20.6,4.1Z" />
 
-    <!-- Bottom-right shape (green) - grows from bottom-right corner -->
-    <path fill="#3CAC3B" class="shape-bottom-out"
+    <!-- Bottom-right outer shape - grows from bottom-right corner -->
+    <path fill="#004C3F" class="shape-bottom-out"
         d="M105.9,48.6c-12.4-8.2-29.3-4.8-39.4.8-23.4,12.8-37.7,51.9-19.1,74.1s63.9,15.3,76-5.6c7.6-13.3,1.8-31.1-2.3-43.8C117.6,63.3,114.7,54.3,105.9,48.6Z" />
 
-    <!-- Inner-bottom shape (red) - grows from bottom-right, different timing -->
-    <path fill="#E61D25" class="shape-bottom-in"
+    <!-- Inner-bottom shape - grows from bottom-right, different timing -->
+    <path fill="#B387FF" class="shape-bottom-in"
         d="M102,67.1c-9.6-6.1-22-3.1-29.5,2-15.4,10.7-19.6,37.5-7.6,47.8s35.9,3.9,44.5-12.5C115.5,92.6,113.9,74.6,102,67.1Z" />
 
-    <!-- Top group new shapes -->
-    <!-- Yellow -->
-    <path fill="#CDDC39" class="shape-top-mid-1"
+    <!-- Top group inner shapes -->
+    <path fill="#D60000" class="shape-top-mid-1"
         d="M35,6c-9-6-21.5-3.5-30,2-14,9-17.5,30-5,43s28.5,10,37.5-8.5C40,30,40,14,35,6Z" />
 
-    <!-- Orange-Red -->
-    <path fill="#FF4500" class="shape-top-mid-2"
+    <path fill="#751312" class="shape-top-mid-2"
         d="M 34 12 c -7 -4.5 -17 -2.5 -24 1.5 c -12 7.5 -14.5 24 -2.5 37.5 s 25.5 8.5 32.5 -7 C 46 34 39 18 34 12 Z" />
 
-    <!-- Red -->
-    <path fill="#E61D25" class="shape-top-mid-3"
+    <path fill="#6101EB" class="shape-top-mid-3"
         d="M 33 18 c -5.5 -3.5 -13.5 -2 -19 1 c -9.5 6 -11.5 19.5 -2 30 s 21 4 25 -7 C 41 27 40 23 33 18 Z" />
 
-    <!-- Dark Red -->
-    <path fill="#8B1A1A" class="shape-top-mid-4"
+    <path fill="#1A247D" class="shape-top-mid-4"
         d="M 31 23 c -4 -2.5 -10.5 -1.5 -15 0.5 c -7.5 4.5 -9 15 -1 23 s 15.5 5 20.5 -5 C 39 30 39 28 31 23 Z" />
 
-    <!-- Bottom group new shapes -->
-    <!-- Light Blue -->
-    <path fill="#6F86D6" class="shape-mid-1"
+    <path fill="#E81F63" class="shape-top-mid-5"
+        d="M 29 28 c -3.2 -2 -8.5 -1.2 -12 0.4 c -6 3.6 -7.2 12 -0.8 18.4 s 12.4 4 16.4 -4 C 36 34 35 31.5 29 28 Z" />
+
+    <path fill="#FF9E81" class="shape-top-mid-6"
+        d="M 27 32 c -2.6 -1.6 -6.8 -1 -9.6 0.3 c -4.8 2.9 -5.8 9.6 -0.6 14.7 s 9.9 3.2 13.1 -3.2 C 33 37 32 35 27 32 Z" />
+
+    <path fill="#FF3D00" class="shape-top-mid-7"
+        d="M 25 36 c -2.1 -1.3 -5.4 -0.8 -7.7 0.2 c -3.8 2.3 -4.6 7.7 -0.5 11.8 s 7.9 2.6 10.5 -2.6 C 30 40 29 38 25 36 Z" />
+
+    <!-- Bottom group inner shapes -->
+    <path fill="#ECFF43" class="shape-mid-1"
         d="M103,60c-10.5-7-23.5-4-32,2-15,10.5-19,34-7,50.5s33.5,12,45.5-7.5C114,98,113,70,103,60Z" />
 
-    <!-- Dark Red -->
-    <path fill="#8B1A1A" class="shape-mid-2"
+    <path fill="#63FFD8" class="shape-mid-2"
         d="M101,67c-8-5.2-18.5-3-26.5,1.5-14,9.5-17.5,31-4,46s31.5,10.5,39.5-8.5C112,93,111,75,101,67Z" />
 
-    <!-- Orange-Red -->
-    <path fill="#FF4500" class="shape-mid-4"
+    <path fill="#B0EA00" class="shape-mid-4"
         d="M 97 80 c -5 -3.2 -12.5 -2 -18.5 0.5 c -11 7 -13.5 23.5 -2 35.5 s 25.5 9 31.5 -5 C 113 96 104 85 97 80 Z" />
+
+    <path fill="#BA69C6" class="shape-mid-5"
+        d="M 94 85 c -4.2 -2.7 -10.5 -1.7 -15.5 0.4 c -9.2 5.9 -11.3 19.7 -1.7 29.7 s 21.3 7.5 26.3 -4.2 C 107 99 100 89 94 85 Z" />
+
+    <path fill="#2095F2" class="shape-mid-6"
+        d="M 91 90 c -3.5 -2.2 -8.8 -1.4 -13 0.3 c -7.7 4.9 -9.4 16.4 -1.4 24.7 s 17.8 6.3 21.9 -3.5 C 102 102 96 94 91 90 Z" />
+
 </svg>
