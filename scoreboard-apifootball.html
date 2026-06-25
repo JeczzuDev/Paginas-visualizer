@@ -1,0 +1,1966 @@
+<!DOCTYPE html>
+<!--
+====================================================================
+  Soccer Scoreboard  —  single-file OBS browser source (multi-theme)
+====================================================================
+  One self-contained file, two modes (selected by URL):
+
+    scoreboard.html              -> DISPLAY mode  (add this as the
+                                    OBS Browser Source; transparent
+                                    background composites over video)
+
+    scoreboard.html?control=1    -> CONTROL panel (operator UI:
+                                    pick a match from the API, edit
+                                    teams, drive score / clock / status,
+                                    and switch visual THEME)
+
+  THEMES (state.theme):
+    wc26     -> Official World Cup 2026 board: colored flag backdrop,
+                white timer panel, black team capsule (tpl-official).
+    chile-1  -> Chilean broadcast bar: dark-blue logo + timer caps and
+                a raised white team panel (tpl-chile1).
+    Each theme maps to its own <template> via TEMPLATE_FOR and is
+    styled by its own CSS block, so edits stay isolated.
+
+  HOW THE TWO MODES TALK (no server):
+    State lives in localStorage under one key and is synced live via
+    BroadcastChannel + the 'storage' event + a ~500ms polling fallback.
+    Because they share localStorage, the control panel and the display
+    must run in the SAME browser context (both OBS Browser Sources, or
+    both tabs in one browser).
+
+  DATA (hybrid) — API-Football (api-sports.io), v3:
+    Auth: header  x-apisports-key: <YOUR KEY>   (free plan = 100 req/day)
+    Paste the key in the control panel (stored locally) or set
+    CONFIG.API_KEY below. Direct api-sports.io endpoints send CORS
+    headers, so this works from a browser / OBS without a proxy.
+    * /fixtures?live=all            every match currently live (best!)
+    * /fixtures?date=YYYY-MM-DD     a day's matches
+    * /teams?search=<name>          team id + logo
+    * /fixtures?team=<id>&last=10   a team's recent fixtures
+    * /fixtures?team=<id>&next=10   a team's upcoming fixtures
+    * /fixtures?id=<id>             refresh one fixture (score + minute)
+    This provider exposes the live elapsed minute, so auto-refresh can
+    drive both the score and the clock. MANUAL control still overrides.
+-->
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scoreboard · API-Football</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Sofia+Sans+Condensed:wght@500;600;700;800&family=Saira+Condensed:ital,wght@1,900&family=Montserrat:wght@800;900&display=swap"
+        rel="stylesheet">
+    <style>
+        /* ---- WC26 brand kit (from wc2026_bg.html) -------------------- */
+        :root {
+            --wc-blue-1: #1D2182;
+            --wc-blue-2: #3150F6;
+            --wc-blue-3: #82B1FF;
+            --wc-green-2: #01C853;
+            --wc-green-3: #B0E906;
+            --wc-red-2: #D60000;
+            --wc-red-3: #FF3B01;
+            --wc-magenta: #E6007E;
+            --wc-gray: #D1D4D1;
+
+            --team-a: var(--wc-blue-2);
+            --team-b: var(--wc-red-2);
+            --font: 'Segoe UI', 'Arial Narrow', Arial, sans-serif;
+        }
+
+        @property --ang {
+            syntax: '<angle>';
+            initial-value: 0deg;
+            inherits: false;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            height: 100%;
+            font-family: var(--font);
+            background: transparent;
+            /* OBS composites over the video feed */
+        }
+
+        /* page is exactly one viewport tall: scoreboard on top, control bar
+           pinned to the bottom (crop the bottom in OBS) */
+        body {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ============================================================
+           DISPLAY — shared layout (themes restyle on top of this)
+           ============================================================ */
+        #display {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 16px;
+            color: #fff;
+            padding: 40px 12px 24px 24px;
+            /* scoreboard pinned top-left so it's easy to place in an OBS scene;
+               control bar flows below (crop it in OBS) */
+        }
+
+        .board {
+            display: flex;
+            align-items: center;
+        }
+
+        .side {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .badge {
+            height: 36px;
+            width: 46px;
+            object-fit: cover;
+            border-radius: 6px;
+        }
+
+        .badge.hidden {
+            display: none;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            box-shadow: 0 0 6px rgba(255, 255, 255, .5);
+        }
+
+        .side.a .dot {
+            background: var(--team-a);
+        }
+
+        .side.b .dot {
+            background: var(--team-b);
+        }
+
+        .abbr {
+            font-weight: 800;
+            font-size: 30px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .score {
+            font-weight: 800;
+            font-size: 30px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .emblem {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .emblem.hidden {
+            display: none;
+        }
+
+        .emblem img {
+            display: block;
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        .clockwrap {
+            display: flex;
+            align-items: center;
+            gap: 26px;
+        }
+
+        .clock {
+            font-weight: 800;
+            font-variant-numeric: tabular-nums;
+            font-size: 30px;
+            letter-spacing: 1px;
+        }
+
+        .status {
+            font-size: 12px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 2px 9px;
+            background: var(--wc-green-2);
+            color: #04270f;
+        }
+
+        .status.hidden {
+            display: none;
+        }
+
+        .status.live {
+            background: var(--wc-red-2);
+            color: #fff;
+            animation: pulse 1.6s ease-in-out infinite;
+        }
+
+        .status.ht,
+        .status.ft {
+            background: var(--wc-gray);
+            color: #1a1a1a;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: .45;
+            }
+        }
+
+        @keyframes angspin {
+            to {
+                --ang: 360deg;
+            }
+        }
+
+        /* ============================================================
+           THEME: wc26  (pure HTML: flex color background + absolute overlay)
+           Structure from pixel_perfect_wc2026_scoreboard.html
+           ============================================================ */
+        #display[data-theme="wc26"] {
+            gap: 0;
+            font-family: 'Montserrat', sans-serif;
+        }
+
+        #display[data-theme="wc26"] .scoreboard {
+            --s: 1;
+            /* overall size multiplier — tune for your OBS canvas */
+            position: relative;
+            width: 1190px;
+            height: 120px;
+            transform: scale(var(--s));
+            transform-origin: center;
+        }
+
+        /* ---- colored background bands + white timer panel (flex row) ---- */
+        #display[data-theme="wc26"] .flex-bg {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            border-radius: 30px;
+            overflow: hidden;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, .30);
+            background-color: #fff;
+        }
+
+        #display[data-theme="wc26"] .flex-bg>div {
+            height: 100%;
+        }
+
+        #display[data-theme="wc26"] .flex-bg .pink {
+            flex: 0 0 16%;
+            background: #f58e7c;
+            border-top-left-radius: 30px;
+            border-bottom-left-radius: 30px;
+        }
+
+        #display[data-theme="wc26"] .flex-bg .red {
+            flex: 0 0 14%;
+            background: #b5000a;
+        }
+
+        #display[data-theme="wc26"] .flex-bg .purple {
+            flex: 0 0 16%;
+            background: #bb7aef;
+        }
+
+        /* right-hand purple is the colored pill's right cap */
+        #display[data-theme="wc26"] .flex-bg .purple:nth-of-type(5) {
+            border-top-right-radius: 30px;
+            border-bottom-right-radius: 30px;
+        }
+
+        #display[data-theme="wc26"] .flex-bg .green {
+            flex: 0 0 14%;
+            background: #b9fb39;
+        }
+
+        #display[data-theme="wc26"] .flex-bg .white {
+            flex: 1 1 auto;
+            background: #fffdfe;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #display[data-theme="wc26"] .timer {
+            font-family: 'Montserrat', sans-serif;
+            font-weight: 900;
+            color: #0f0f12;
+            font-size: 56px;
+            letter-spacing: 2px;
+        }
+
+        /* ---- black capsule overlay (teams + score section) ---- */
+        #display[data-theme="wc26"] .overlay {
+            position: absolute;
+            left: 20px;
+            top: 4px;
+            bottom: 14px;
+            right: 300px;
+            background: #000;
+            border-radius: 26px;
+            z-index: 2;
+        }
+
+        #display[data-theme="wc26"] .team-1,
+        #display[data-theme="wc26"] .team-2 {
+            position: absolute;
+            top: 0;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        #display[data-theme="wc26"] .team-1 {
+            left: 26px;
+        }
+
+        #display[data-theme="wc26"] .team-2 {
+            right: 26px;
+        }
+
+        #display[data-theme="wc26"] .team-code {
+            font-family: 'Saira Condensed', sans-serif;
+            font-weight: 900;
+            color: #fff;
+            font-size: 62px;
+            line-height: 1;
+            text-shadow:
+                3px 1px 0 rgba(0, 0, 0, .60),
+                6px 3px 0 rgba(0, 0, 0, .40),
+                9px 6px 10px rgba(0, 0, 0, .35);
+        }
+
+        #display[data-theme="wc26"] .dot {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            border: 3px white solid;
+            flex: none;
+        }
+
+        #display[data-theme="wc26"] .light-blue-dot {
+            background: var(--team-a);
+            box-shadow: inset 0 0 0 5px rgba(0, 0, 0, .18);
+        }
+
+        #display[data-theme="wc26"] .dark-blue-dot {
+            background: var(--team-b);
+            box-shadow: inset 0 0 0 5px rgba(0, 0, 0, .28), 0 0 0 3px rgba(150, 150, 160, .45);
+        }
+
+        #display[data-theme="wc26"] .flag-container {
+            display: flex;
+        }
+
+        #display[data-theme="wc26"] .flag {
+            width: 58px;
+            height: 40px;
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            box-shadow: 0 0 0 3px rgba(244, 244, 246, .92), 0 3px 8px rgba(0, 0, 0, .42);
+        }
+
+        #display[data-theme="wc26"] .flag-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        /* ---- center score section (teal plate + scores + logo) ---- */
+        #display[data-theme="wc26"] .score-section {
+            position: absolute;
+            left: 50%;
+            top: -4px;
+            /* span the full board height (same as .flex-bg) */
+            bottom: -14px;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            background: #3cfed5;
+            border-radius: 18px;
+            padding: 0 26px;
+            z-index: 3;
+        }
+
+        #display[data-theme="wc26"] .logo-container {
+            width: 100px;
+        }
+
+        #display[data-theme="wc26"] .score-box {
+            font-family: 'Montserrat', sans-serif;
+            color: #07120f;
+            font-size: 64px;
+            line-height: 1;
+            min-width: 44px;
+            text-align: center;
+        }
+
+        #display[data-theme="wc26"] .logo-slot {
+            width: 100%;
+            height: 100%;
+            /* a little taller than the board so it pokes above/below */
+            background: #010002;
+            border-radius: 16px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #display[data-theme="wc26"] .logo-image {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            padding: 10px;
+            display: block;
+        }
+
+        /* base clock pill sizing for the chile family — chile-1 overrides
+           the background into a dark-blue cap below */
+        #display[data-theme^="chile"] .clockwrap {
+            background: #0b0e14;
+            height: 120px;
+            padding: 0 28px;
+        }
+
+        #display[data-theme^="chile"] .clock {
+            font-size: 52px;
+            color: #fff;
+        }
+
+        /* ============================================================
+           THEME: chile-1  (broadcast bar — reference-image adaptation)
+           one flex row of three panels: dark-blue logo cap · raised
+           white team panel (team-colour top borders + magenta centre
+           divider) · dark-blue timer cap.
+           ============================================================ */
+        #display[data-theme="chile-1"] .board {
+            align-items: center;
+            background: none;
+            overflow: visible;
+        }
+
+        /* the two dark side caps (logo + timer) share a look */
+        #display[data-theme="chile-1"] .emblem,
+        #display[data-theme="chile-1"] .clockwrap {
+            height: 96px;
+            background: linear-gradient(160deg, #000b2f, #070d28);
+            box-shadow: 0 10px 24px rgba(0, 0, 0, .40);
+        }
+
+        #display[data-theme="chile-1"] .emblem {
+            width: 104px;
+            padding: 18px;
+        }
+
+        #display[data-theme="chile-1"] .emblem img {
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        #display[data-theme="chile-1"] .clockwrap {
+            padding: 0 26px;
+        }
+
+        /* raised white panel grouping side A + B (taller than the caps) */
+        #display[data-theme="chile-1"] .teams {
+            position: relative;
+            display: flex;
+            align-items: stretch;
+            height: 120px;
+            background: #f4f5f7;
+            overflow: hidden;
+            box-shadow: 0 10px 24px rgba(0, 0, 0, .40);
+        }
+
+        #display[data-theme="chile-1"] .side {
+            position: relative;
+            height: 100%;
+            padding: 0 28px;
+            gap: 14px;
+            background: none;
+            align-items: center;
+        }
+
+        /* each side carries its team colour as a top border */
+        #display[data-theme="chile-1"] .side.a {
+            border-top: 13px solid var(--team-a);
+        }
+
+        #display[data-theme="chile-1"] .side.b {
+            border-top: 13px solid var(--team-b);
+        }
+
+        /* magenta divider between the two scores */
+        #display[data-theme="chile-1"] .side.a::after {
+            content: '';
+            position: absolute;
+            right: -2px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 4px;
+            height: 60px;
+            border-radius: 2px;
+            background: var(--wc-magenta);
+        }
+
+        #display[data-theme="chile-1"] .dot {
+            display: none;
+        }
+
+        /* team crests, back in each side */
+        #display[data-theme="chile-1"] .badge {
+            width: auto;
+            height: 60px;
+            object-fit: contain;
+            border-radius: 0;
+        }
+
+        #display[data-theme="chile-1"] .abbr,
+        #display[data-theme="chile-1"] .score,
+        #display[data-theme="chile-1"] .clock {
+            font-family: 'Sofia Sans Condensed', 'Saira Condensed', sans-serif;
+            color: #0f0f12;
+            font-weight: 700;
+        }
+
+        #display[data-theme="chile-1"] .clock {
+            color: #fff;
+            font-weight: 500;
+            align-self: center;
+        }
+
+        #display[data-theme="chile-1"] .abbr {
+            font-size: 50px;
+            letter-spacing: 1px;
+        }
+
+        #display[data-theme="chile-1"] .score {
+            font-size: 56px;
+            font-weight: 700;
+        }
+
+        /* ============================================================
+           CONTROL BAR — single URL, pinned to the bottom of the 100vh page
+           (crop it out in OBS). ONE shared horizontal scrollbar for all
+           rows; native <select>s replaced (they don't render in OBS CEF).
+           ============================================================ */
+        #control {
+            background: #0e1020;
+            color: #e9ecf5;
+            border-top: 2px solid #2a2f4d;
+            margin-top: auto;
+            /* stick to the bottom of the viewport */
+            overflow-x: auto;
+            /* single horizontal scrollbar for the whole block */
+            padding: 10px 12px;
+            font-family: var(--font);
+        }
+
+        .ctl-rows {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            width: max-content;
+            /* rows size to content; #control scrolls them together */
+            min-width: 100%;
+        }
+
+        .ctl-row {
+            display: flex;
+            flex-wrap: nowrap;
+            align-items: center;
+            gap: 10px;
+            white-space: nowrap;
+        }
+
+        .ctl-row>* {
+            flex: none;
+        }
+
+        .ctl-row .lbl {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            color: #9aa0c2;
+            padding: 0 2px;
+        }
+
+        .ctl-sep {
+            width: 1px;
+            align-self: stretch;
+            background: #2a2f4d;
+            margin: 0 4px;
+        }
+
+        input[type=text],
+        input[type=date],
+        input[type=number] {
+            background: #1a1d33;
+            border: 1px solid #303656;
+            color: #e9ecf5;
+            border-radius: 6px;
+            padding: 8px 10px;
+            font-size: 15px;
+            font-family: var(--font);
+        }
+
+        input[type=color] {
+            width: 40px;
+            height: 38px;
+            padding: 2px;
+            border: 1px solid #303656;
+            border-radius: 6px;
+            background: #1a1d33;
+        }
+
+        button {
+            background: var(--wc-blue-2);
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 15px;
+            font-weight: 700;
+            font-family: var(--font);
+            cursor: pointer;
+        }
+
+        button:hover {
+            filter: brightness(1.1);
+        }
+
+        button.ghost {
+            background: #262a47;
+        }
+
+        button.green {
+            background: var(--wc-green-2);
+            color: #04270f;
+        }
+
+        button.red {
+            background: var(--wc-red-2);
+        }
+
+        button.step {
+            min-width: 38px;
+            font-size: 20px;
+            padding: 4px 10px;
+        }
+
+        .val {
+            font-size: 26px;
+            font-weight: 800;
+            min-width: 30px;
+            text-align: center;
+        }
+
+        .toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 14px;
+            color: #c7cbe6;
+        }
+
+        .theme-buttons,
+        .seg {
+            display: flex;
+            gap: 6px;
+        }
+
+        .theme-buttons button.active,
+        .seg button.active {
+            outline: 2px solid var(--wc-green-3);
+        }
+
+        .api-status {
+            font-size: 13px;
+            color: #8b90ad;
+            max-width: 280px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .api-status.err {
+            color: var(--wc-red-3);
+        }
+
+        .api-status.ok {
+            color: var(--wc-green-3);
+        }
+
+        .api-quota {
+            font-size: 12px;
+            font-weight: 700;
+            color: #8b90ad;
+            padding: 2px 8px;
+            border-radius: 999px;
+        }
+
+        .api-quota.warn {
+            color: var(--wc-red-3);
+        }
+
+        .api-quota.over {
+            color: #fff;
+            background: var(--wc-red-2);
+        }
+
+        /* ---- searchable match-picker popup (OBS-safe, pure HTML) ---- */
+        .modal {
+            position: fixed;
+            inset: 0;
+            z-index: 200;
+            background: rgba(4, 6, 16, .66);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .modal.hidden {
+            display: none;
+        }
+
+        .modal-card {
+            width: min(760px, 94vw);
+            max-height: 82vh;
+            display: flex;
+            flex-direction: column;
+            background: #141728;
+            color: #e9ecf5;
+            /* readable text on the dark card */
+            border: 1px solid #2a2f4d;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, .6);
+            overflow: hidden;
+        }
+
+        .modal-head {
+            display: flex;
+            gap: 8px;
+            padding: 12px;
+            border-bottom: 1px solid #262a47;
+        }
+
+        .modal-head input {
+            flex: 1;
+            font-size: 16px;
+        }
+
+        .modal-filters {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            padding: 10px 12px;
+            border-bottom: 1px solid #262a47;
+        }
+
+        .chip {
+            background: #262a47;
+            color: #cfd3ee;
+            border: none;
+            border-radius: 999px;
+            padding: 6px 14px;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .chip.active {
+            background: var(--wc-green-2);
+            color: #04270f;
+        }
+
+        .modal-list {
+            overflow-y: auto;
+            padding: 6px;
+            flex: 1;
+        }
+
+        .modal-foot {
+            padding: 8px 12px;
+            border-top: 1px solid #262a47;
+            font-size: 12px;
+            color: #8b90ad;
+        }
+
+        .dd-item {
+            padding: 10px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .dd-item:hover,
+        .dd-item.active {
+            background: #262a47;
+        }
+
+        .dd-empty {
+            padding: 22px;
+            text-align: center;
+            color: #8b90ad;
+            font-size: 14px;
+        }
+
+        /* ---- custom color picker (native <input type=color> is invisible in OBS) ---- */
+        .swatch {
+            width: 40px;
+            height: 38px;
+            border-radius: 6px;
+            border: 1px solid #303656;
+            cursor: pointer;
+            padding: 0;
+        }
+
+        .color-preview {
+            width: 52px;
+            height: 40px;
+            border-radius: 6px;
+            border: 1px solid #303656;
+            flex: none;
+        }
+
+        .color-sliders {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .color-sliders label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            color: #c7cbe6;
+        }
+
+        .color-sliders input[type=range] {
+            flex: 1;
+            accent-color: var(--wc-blue-2);
+        }
+
+        .color-palette {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            gap: 6px;
+        }
+
+        .pal {
+            height: 30px;
+            border-radius: 6px;
+            border: 1px solid #303656;
+            cursor: pointer;
+            padding: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- ============================ DISPLAY ============================ -->
+    <!-- Theme markup is injected from the <template>s below (see ensureTheme). -->
+    <div id="display"></div>
+
+    <!-- chile-1 layout: one flex row — logo cap · raised white team panel
+         (sides grouped) · timer cap. All on the same flex (the .board). -->
+    <template id="tpl-chile1">
+        <div class="board">
+            <div class="emblem" data-logo data-adjust="logo">
+                <img src="WC26_Logo.avif" alt="" onerror="this.style.display='none'">
+            </div>
+            <div class="teams">
+                <div class="side a">
+                    <img class="badge" data-badge-a data-adjust="flagA" alt="">
+                    <span class="abbr" data-abbr-a data-adjust="abbrA">FRA</span>
+                    <span class="score" data-score-a data-adjust="scoreA">0</span>
+                </div>
+                <div class="side b">
+                    <span class="score" data-score-b data-adjust="scoreB">0</span>
+                    <span class="abbr" data-abbr-b data-adjust="abbrB">SEN</span>
+                    <img class="badge" data-badge-b data-adjust="flagB" alt="">
+                </div>
+            </div>
+            <div class="clockwrap">
+                <span class="clock" data-clock data-adjust="clock">90:00</span>
+                <span class="status" data-status data-adjust="status">LIVE</span>
+            </div>
+        </div>
+    </template>
+
+    <!-- Official WC26 board — pure HTML. Colored backdrop + white timer panel
+         are a flex row; the black capsule (teams + score section) is absolutely
+         positioned over it. Flags/codes/scores/timer/logo are data-hooks. -->
+    <template id="tpl-official">
+        <div class="scoreboard">
+            <!-- colored background bands + white timer panel -->
+            <div class="flex-bg">
+                <div class="pink"></div>
+                <div class="red"></div>
+                <div class="purple"></div>
+                <div class="green"></div>
+                <div class="purple"></div>
+                <div class="white">
+                    <span class="timer" data-clock data-adjust="clock">90:00</span>
+                </div>
+            </div>
+
+            <!-- black capsule overlay -->
+            <div class="overlay">
+                <div class="team-1">
+                    <div class="flag-container" data-adjust="flagA">
+                        <div class="flag"><img class="flag-img" data-badge-a alt=""></div>
+                    </div>
+                    <div class="dot light-blue-dot"></div>
+                    <div class="team-code" data-abbr-a data-adjust="abbrA">FRA</div>
+                </div>
+
+                <div class="score-section">
+                    <div class="score-box left-score" data-score-a data-adjust="scoreA">0</div>
+                    <div class="logo-container">
+                        <div class="logo-slot" data-logo data-adjust="logo">
+                            <img src="WC26_Logo.avif" alt="WC26 Logo" class="logo-image"
+                                onerror="this.style.display='none'">
+                        </div>
+                    </div>
+                    <div class="score-box right-score" data-score-b data-adjust="scoreB">0</div>
+                </div>
+
+                <div class="team-2">
+                    <div class="team-code" data-abbr-b data-adjust="abbrB">SEN</div>
+                    <div class="dot dark-blue-dot"></div>
+                    <div class="flag-container" data-adjust="flagB">
+                        <div class="flag"><img class="flag-img" data-badge-b alt=""></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- ===== CONTROL BAR (single URL; crop this out in OBS) ===== -->
+    <div id="control">
+        <div class="ctl-rows">
+            <!-- Row 1 — API -->
+            <div class="ctl-row">
+                <span class="lbl">Relay</span>
+                <input type="text" data-relay-url placeholder="https://…workers.dev (live source)" style="width:230px">
+                <span class="ctl-sep"></span>
+                <span class="lbl">API</span>
+                <input type="text" data-api-key placeholder="api-sports.io key (optional)" style="width:200px">
+                <button class="green" data-api-live>Live</button>
+                <input type="date" data-api-date>
+                <button data-api-load-date>Day</button>
+                <input type="text" data-api-team placeholder="team name…" style="width:140px">
+                <button data-api-load-team>Find</button>
+                <button class="green" data-match-open>🔍 Pick match…</button>
+                <button data-api-refresh title="Fetch the latest score for the picked match">↻ Refresh</button>
+                <span class="api-quota" data-api-quota title="API-Football requests used today">0/100</span>
+                <span class="api-status" data-api-status></span>
+            </div>
+
+            <!-- Row 2 — Theme + Teams -->
+            <div class="ctl-row">
+                <span class="lbl">Theme</span>
+                <div class="theme-buttons" data-theme-buttons>
+                    <button data-theme-pick="wc26">WC26</button>
+                    <button class="ghost" data-theme-pick="chile-1">Chile 1</button>
+                </div>
+                <span class="ctl-sep"></span>
+                <span class="lbl">A</span>
+                <input type="text" data-name-a placeholder="Team A" style="width:120px">
+                <input type="text" data-abbr-a-in maxlength="4" placeholder="ABR" style="width:60px">
+                <button class="swatch" data-color-a title="Team A color"></button>
+                <input type="text" data-badge-a-in placeholder="flag/url" style="width:96px">
+                <button class="step ghost" data-score-a-dec>−</button>
+                <span class="val" data-score-a-val>0</span>
+                <button class="step" data-score-a-inc>+</button>
+                <span class="ctl-sep"></span>
+                <span class="lbl">B</span>
+                <input type="text" data-name-b placeholder="Team B" style="width:120px">
+                <input type="text" data-abbr-b-in maxlength="4" placeholder="ABR" style="width:60px">
+                <button class="swatch" data-color-b title="Team B color"></button>
+                <input type="text" data-badge-b-in placeholder="flag/url" style="width:96px">
+                <button class="step ghost" data-score-b-dec>−</button>
+                <span class="val" data-score-b-val>0</span>
+                <button class="step" data-score-b-inc>+</button>
+                <span class="ctl-sep"></span>
+                <button class="ghost" data-swap>⇄ Swap</button>
+                <button class="red ghost" data-reset-score>0-0</button>
+            </div>
+
+            <!-- Row 3 — Clock & Status -->
+            <div class="ctl-row">
+                <span class="lbl">Clock</span>
+                <input type="number" data-clock-min min="0" max="200" value="0" style="width:64px">
+                <span class="lbl">:</span>
+                <input type="number" data-clock-sec min="0" max="59" value="0" style="width:64px">
+                <button class="ghost" data-clock-set>Set</button>
+                <button class="green" data-clock-start>Start</button>
+                <button class="ghost" data-clock-pause>Pause</button>
+                <button class="red ghost" data-clock-reset>Reset</button>
+                <span class="ctl-sep"></span>
+                <span class="lbl">Status</span>
+                <div class="seg" data-status-buttons>
+                    <button data-status-pick="LIVE">LIVE</button>
+                    <button class="ghost" data-status-pick="HT">HT</button>
+                    <button class="ghost" data-status-pick="FT">FT</button>
+                    <button class="ghost" data-status-pick="__custom">Custom</button>
+                </div>
+                <input type="text" data-status-custom placeholder="e.g. 45+2" hidden style="width:100px">
+                <span class="ctl-sep"></span>
+                <label class="toggle"><input type="checkbox" data-show-logo checked> logo</label>
+                <span class="lbl">Logo</span>
+                <div class="seg" data-logo-buttons>
+                    <button data-logo-pick="WC26_Logo.avif">WC26</button>
+                    <button class="ghost" data-logo-pick="CHILE_1_Logo.png">Chile 1</button>
+                    <button class="ghost" data-logo-pick="CHILE_2_Logo.png">Chile 2</button>
+                    <button class="ghost" data-logo-pick="CHILE_3_Logo.png">Chile 3</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Searchable match picker (popup) ===== -->
+    <div id="match-modal" class="modal hidden" data-match-modal>
+        <div class="modal-card">
+            <div class="modal-head">
+                <input type="text" data-match-search
+                    placeholder="Filter by team, league or country — e.g. “germany cura”, “u de chile”">
+                <button class="ghost" data-match-close>✕</button>
+            </div>
+            <div class="modal-filters">
+                <button class="chip active" data-status-filter="">All</button>
+                <button class="chip" data-status-filter="live">Live</button>
+                <button class="chip" data-status-filter="upcoming">Upcoming</button>
+                <button class="chip" data-status-filter="finished">Finished</button>
+            </div>
+            <div class="modal-list" data-match-list></div>
+            <div class="modal-foot"><span data-match-count></span> · click a match to load it</div>
+        </div>
+    </div>
+
+    <!-- ===== Color picker (popup) ===== -->
+    <div id="color-modal" class="modal hidden" data-color-modal>
+        <div class="modal-card" style="width:min(380px,94vw)">
+            <div class="modal-head">
+                <strong data-color-title>Team color</strong>
+                <button class="ghost" data-color-close>✕</button>
+            </div>
+            <div style="padding:14px; display:flex; flex-direction:column; gap:14px;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div class="color-preview" data-color-preview></div>
+                    <input type="text" data-color-hex maxlength="7" placeholder="#RRGGBB" style="width:120px">
+                </div>
+                <div class="color-sliders">
+                    <label>R <input type="range" min="0" max="255" data-rgb-r></label>
+                    <label>G <input type="range" min="0" max="255" data-rgb-g></label>
+                    <label>B <input type="range" min="0" max="255" data-rgb-b></label>
+                </div>
+                <div class="color-palette" data-color-palette></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        'use strict';
+
+        /* ---- Config -------------------------------------------------- */
+        const CONFIG = {
+            STORAGE_KEY: 'scoreboard_apifootball',
+            CHANNEL: 'scoreboard_apifootball_sync',
+            KEY_STORE: 'scoreboard_apifootball_key',    // where the api-sports.io key is cached
+            QUOTA_STORE: 'scoreboard_apifootball_quota',// daily request counter (option A)
+            RELAY_STORE: 'scoreboard_relay_url',        // cached Cloudflare relay URL
+            API_BASE: 'https://v3.football.api-sports.io',
+            API_KEY: '',            // your api-sports.io key (header x-apisports-key); or paste it in the panel
+            CORS_PROXY: '',         // usually NOT needed — api-sports.io allows browser CORS
+            DAILY_LIMIT: 100,       // API-Football free plan = 100 requests/day
+            FALLBACK: true,         // option B: on limit/error, fall back to TheSportsDB (no live, delayed)
+            TSDB_BASE: 'https://www.thesportsdb.com/api/v1/json/3',  // free, CORS-friendly, no key
+            RELAY_URL: '',          // SofaScore relay (Cloudflare Worker) — paste it in the panel
+            RELAY_POLL_MS: 30000,   // live auto-poll against the relay (uncapped, real-time-ish)
+            FLAG_BASE: 'https://flagcdn.com/w80',  // 2-letter ISO code -> flag image (CORS-friendly)
+            SYNC_POLL_MS: 500       // localStorage polling fallback (OBS-safe)
+        };
+
+        const THEMES = ['wc26', 'chile-1'];
+
+        /* ---- State --------------------------------------------------- */
+        function defaultState() {
+            return {
+                theme: 'wc26',
+                teamA: { name: 'Francia', abbr: 'FRA', color: '#3150F6', badge: 'fr' },
+                teamB: { name: 'Senegal', abbr: 'SEN', color: '#01C853', badge: 'sn' },
+                scoreA: 0,
+                scoreB: 0,
+                // Clock is timestamp-based so both windows compute the same value
+                // without per-second writes: elapsed = base + (running ? (now-since)/1000 : 0)
+                clock: { base: 5400, running: false, since: 0 },  // 90:00 default
+                status: 'LIVE',
+                source: 'manual',
+                showLogo: true,
+                logo: 'WC26_Logo.avif',   // which emblem image the logo slot shows
+                adjust: {},     // per-element { x, y, scale } nudges keyed by data-adjust
+                rev: 0
+            };
+        }
+
+        function loadState() {
+            try {
+                const raw = localStorage.getItem(CONFIG.STORAGE_KEY);
+                if (raw) return Object.assign(defaultState(), JSON.parse(raw));
+            } catch (e) { /* ignore */ }
+            return defaultState();
+        }
+
+        let state = loadState();
+        const channel = ('BroadcastChannel' in window) ? new BroadcastChannel(CONFIG.CHANNEL) : null;
+
+        function saveState() {
+            state.rev = Date.now();
+            const json = JSON.stringify(state);
+            try { localStorage.setItem(CONFIG.STORAGE_KEY, json); } catch (e) { /* ignore */ }
+            if (channel) channel.postMessage(json);
+            render();
+        }
+
+        function applyIncoming(json) {
+            try {
+                const next = JSON.parse(json);
+                if (next && next.rev !== state.rev) {
+                    state = Object.assign(defaultState(), next);
+                    syncControlsFromState();
+                    render();
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        // Three sync paths so it works in plain browsers AND inside OBS CEF:
+        if (channel) channel.onmessage = (e) => applyIncoming(e.data);
+        window.addEventListener('storage', (e) => {
+            if (e.key === CONFIG.STORAGE_KEY && e.newValue) applyIncoming(e.newValue);
+        });
+        setInterval(() => {
+            const raw = localStorage.getItem(CONFIG.STORAGE_KEY);
+            if (raw) applyIncoming(raw);
+        }, CONFIG.SYNC_POLL_MS);
+
+        /* ---- Clock helpers ------------------------------------------ */
+        function elapsedSeconds() {
+            const c = state.clock;
+            const extra = c.running ? (Date.now() - c.since) / 1000 : 0;
+            return Math.max(0, Math.floor(c.base + extra));
+        }
+
+        function formatClock(totalSec) {
+            const m = Math.floor(totalSec / 60);
+            const s = totalSec % 60;
+            return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+        }
+
+        /* ---- Badge resolution (URL or 2-letter ISO flag code) ------- */
+        function resolveBadge(val) {
+            const v = (val || '').trim();
+            if (!v) return '';
+            if (/^[A-Za-z]{2}$/.test(v)) return `${CONFIG.FLAG_BASE}/${v.toLowerCase()}.png`;
+            return v;
+        }
+
+        /* ============================================================
+           DISPLAY RENDERING
+           ============================================================ */
+        const $ = (sel, root = document) => root.querySelector(sel);
+
+        // Each theme renders from its own <template> so structurally different
+        // designs (the official WC26 board vs. the simple bar) can coexist.
+        const TEMPLATE_FOR = { 'wc26': 'tpl-official', 'chile-1': 'tpl-chile1' };  // fallback below is tpl-official
+        function ensureTheme() {
+            const disp = $('#display');
+            if (!disp) return;
+            const theme = THEMES.includes(state.theme) ? state.theme : 'wc26';
+            if (disp.dataset.theme === theme && disp.childElementCount) return;
+            const tpl = document.getElementById(TEMPLATE_FOR[theme] || 'tpl-official');
+            if (tpl) { disp.innerHTML = ''; disp.appendChild(tpl.content.cloneNode(true)); }
+            disp.dataset.theme = theme;
+        }
+
+        function render() {
+            ensureTheme();
+
+            document.documentElement.style.setProperty('--team-a', state.teamA.color || '#3150F6');
+            document.documentElement.style.setProperty('--team-b', state.teamB.color || '#D60000');
+
+            setText('[data-abbr-a]', state.teamA.abbr || abbrOf(state.teamA.name));
+            setText('[data-abbr-b]', state.teamB.abbr || abbrOf(state.teamB.name));
+            setText('[data-score-a]', state.scoreA);
+            setText('[data-score-b]', state.scoreB);
+
+            // keep the control-panel score readouts in sync with the board
+            setText('[data-score-a-val]', state.scoreA);
+            setText('[data-score-b-val]', state.scoreB);
+
+            setBadge('[data-badge-a]', resolveBadge(state.teamA.badge));
+            setBadge('[data-badge-b]', resolveBadge(state.teamB.badge));
+
+            const logo = $('[data-logo]');
+            if (logo) {
+                logo.classList.toggle('hidden', !state.showLogo);
+                const logoImg = logo.querySelector('img');
+                if (logoImg && state.logo && logoImg.getAttribute('src') !== state.logo) {
+                    logoImg.style.display = '';
+                    logoImg.src = state.logo;
+                }
+            }
+
+            const statusEl = $('[data-status]');
+            if (statusEl) {
+                statusEl.textContent = state.status || '';
+                statusEl.className = 'status ' + statusClass(state.status);
+                statusEl.classList.toggle('hidden', !state.status);
+            }
+            renderClock();
+        }
+
+        function renderClock() {
+            const el = $('[data-clock]');
+            if (!el) return;
+            // Always show the timer — in the official theme it's the only clock
+            // display, so it must stay visible even at full-time (FT).
+            el.classList.remove('hidden');
+            el.textContent = formatClock(elapsedSeconds());
+        }
+
+        function statusClass(s) {
+            const k = (s || '').toLowerCase();
+            if (k === 'live') return 'live';
+            if (k === 'ht') return 'ht';
+            if (k === 'ft') return 'ft';
+            return '';
+        }
+
+        function setText(sel, val) {
+            const el = $(sel);
+            if (el) el.textContent = val;
+        }
+
+        function setBadge(sel, url) {
+            const el = $(sel);
+            if (!el) return;
+            if (url) {
+                el.src = url;
+                el.classList.remove('hidden');
+                el.onerror = () => el.classList.add('hidden');
+            } else {
+                el.removeAttribute('src');
+                el.classList.add('hidden');
+            }
+        }
+
+        function abbrOf(name) {
+            return (name || '').replace(/[^A-Za-zÀ-ÿ]/g, '').slice(0, 3).toUpperCase() || '—';
+        }
+
+        // Tick the clock locally (no writes — pure compute).
+        setInterval(renderClock, 250);
+        render();
+
+        /* ============================================================
+           CONTROL PANEL
+           ============================================================ */
+        initControl();
+
+        function initControl() {
+            $('[data-api-date]').value = new Date().toISOString().slice(0, 10);
+            try { CONFIG.API_KEY = localStorage.getItem(CONFIG.KEY_STORE) || CONFIG.API_KEY; } catch (e) { /* ignore */ }
+            const keyEl = $('[data-api-key]'); if (keyEl) keyEl.value = CONFIG.API_KEY;
+            try { CONFIG.RELAY_URL = localStorage.getItem(CONFIG.RELAY_STORE) || ''; } catch (e) { /* ignore */ }
+            const relEl = $('[data-relay-url]'); if (relEl) relEl.value = CONFIG.RELAY_URL;
+            bindControls();
+            syncControlsFromState();
+            renderQuota();
+        }
+
+        function bindControls() {
+            // --- theme ---
+            document.querySelectorAll('[data-theme-pick]').forEach(btn => {
+                btn.addEventListener('click', () => { state.theme = btn.dataset.themePick; saveState(); markActiveTheme(); });
+            });
+
+            // --- team fields ---
+            bindInput('[data-name-a]', v => { state.teamA.name = v; if (!state.teamA.abbr) state.teamA.abbr = abbrOf(v); saveState(); });
+            bindInput('[data-name-b]', v => { state.teamB.name = v; if (!state.teamB.abbr) state.teamB.abbr = abbrOf(v); saveState(); });
+            bindInput('[data-abbr-a-in]', v => { state.teamA.abbr = v.toUpperCase(); saveState(); });
+            bindInput('[data-abbr-b-in]', v => { state.teamB.abbr = v.toUpperCase(); saveState(); });
+            on('[data-color-a]', () => openColorModal('A'));
+            on('[data-color-b]', () => openColorModal('B'));
+            bindInput('[data-badge-a-in]', v => { state.teamA.badge = v.trim(); saveState(); });
+            bindInput('[data-badge-b-in]', v => { state.teamB.badge = v.trim(); saveState(); });
+
+            // --- scores ---
+            on('[data-score-a-inc]', () => { state.scoreA++; saveState(); });
+            on('[data-score-a-dec]', () => { state.scoreA = Math.max(0, state.scoreA - 1); saveState(); });
+            on('[data-score-b-inc]', () => { state.scoreB++; saveState(); });
+            on('[data-score-b-dec]', () => { state.scoreB = Math.max(0, state.scoreB - 1); saveState(); });
+            on('[data-reset-score]', () => { state.scoreA = 0; state.scoreB = 0; saveState(); });
+            on('[data-swap]', () => {
+                [state.teamA, state.teamB] = [state.teamB, state.teamA];
+                [state.scoreA, state.scoreB] = [state.scoreB, state.scoreA];
+                saveState(); syncControlsFromState();
+            });
+
+            // --- clock ---
+            on('[data-clock-set]', () => {
+                const m = parseInt($('[data-clock-min]').value, 10) || 0;
+                const s = parseInt($('[data-clock-sec]').value, 10) || 0;
+                state.clock.base = m * 60 + s;
+                state.clock.since = Date.now();
+                saveState();
+            });
+            on('[data-clock-start]', () => {
+                if (!state.clock.running) { state.clock.since = Date.now(); state.clock.running = true; saveState(); }
+            });
+            on('[data-clock-pause]', () => {
+                if (state.clock.running) { state.clock.base = elapsedSeconds(); state.clock.running = false; saveState(); }
+            });
+            on('[data-clock-reset]', () => {
+                state.clock.base = 0; state.clock.since = Date.now(); state.clock.running = false; saveState();
+            });
+
+            // --- status (buttons, not a <select>) ---
+            document.querySelectorAll('[data-status-pick]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const v = btn.dataset.statusPick;
+                    const customEl = $('[data-status-custom]');
+                    if (v === '__custom') { customEl.hidden = false; state.status = customEl.value || 'LIVE'; }
+                    else { customEl.hidden = true; state.status = v; }
+                    saveState(); markActiveStatus();
+                });
+            });
+            bindInput('[data-status-custom]', v => { state.status = v || 'LIVE'; saveState(); });
+
+            // --- logo toggle ---
+            on('[data-show-logo]', () => { state.showLogo = $('[data-show-logo]').checked; saveState(); }, 'change');
+
+            // --- logo image selector ---
+            document.querySelectorAll('[data-logo-pick]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    state.logo = btn.dataset.logoPick;
+                    saveState(); markActiveLogo();
+                });
+            });
+
+            // --- API ---
+            bindInput('[data-api-key]', v => { CONFIG.API_KEY = v.trim(); try { localStorage.setItem(CONFIG.KEY_STORE, CONFIG.API_KEY); } catch (e) { /* ignore */ } });
+            bindInput('[data-relay-url]', v => { CONFIG.RELAY_URL = v.trim().replace(/\/+$/, ''); try { localStorage.setItem(CONFIG.RELAY_STORE, CONFIG.RELAY_URL); } catch (e) { /* ignore */ } });
+            on('[data-api-live]', loadLive);
+            on('[data-api-load-date]', loadByDate);
+            on('[data-api-load-team]', loadByTeam);
+            on('[data-api-refresh]', manualRefresh);
+
+            // --- match picker (searchable popup) ---
+            on('[data-match-open]', openMatchModal);
+            on('[data-match-close]', closeMatchModal);
+            on('[data-match-modal]', (e) => { if (e.target === $('[data-match-modal]')) closeMatchModal(); });
+            bindInput('[data-match-search]', renderMatchList);
+            document.querySelectorAll('[data-status-filter]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    matchStatusFilter = btn.dataset.statusFilter;
+                    document.querySelectorAll('[data-status-filter]').forEach(b => b.classList.toggle('active', b === btn));
+                    renderMatchList();
+                });
+            });
+            document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeMatchModal(); closeColorModal(); } });
+
+            // --- color picker popup ---
+            on('[data-color-close]', closeColorModal);
+            on('[data-color-modal]', (e) => { if (e.target === $('[data-color-modal]')) closeColorModal(); });
+            bindInput('[data-color-hex]', setColorFromHex);
+            on('[data-rgb-r]', setColorFromSliders, 'input');
+            on('[data-rgb-g]', setColorFromSliders, 'input');
+            on('[data-rgb-b]', setColorFromSliders, 'input');
+        }
+
+        function bindInput(sel, fn) {
+            const el = $(sel);
+            if (el) el.addEventListener('input', () => fn(el.value));
+        }
+        function on(sel, fn, evt = 'click') {
+            const el = $(sel);
+            if (el) el.addEventListener(evt, fn);
+        }
+
+        function markActiveTheme() {
+            document.querySelectorAll('[data-theme-pick]').forEach(btn => {
+                const active = btn.dataset.themePick === state.theme;
+                btn.classList.toggle('active', active);
+                btn.classList.toggle('ghost', !active);
+            });
+        }
+
+        function markActiveLogo() {
+            document.querySelectorAll('[data-logo-pick]').forEach(btn => {
+                const active = btn.dataset.logoPick === state.logo;
+                btn.classList.toggle('active', active);
+                btn.classList.toggle('ghost', !active);
+            });
+        }
+
+        function markActiveStatus() {
+            const known = ['LIVE', 'HT', 'FT'];
+            const isCustom = !known.includes(state.status);
+            document.querySelectorAll('[data-status-pick]').forEach(btn => {
+                const v = btn.dataset.statusPick;
+                const active = (v === '__custom') ? isCustom : (v === state.status);
+                btn.classList.toggle('active', active);
+                btn.classList.toggle('ghost', !active);
+            });
+            const customEl = $('[data-status-custom]');
+            if (customEl) {
+                customEl.hidden = !isCustom;
+                if (isCustom && document.activeElement !== customEl) customEl.value = state.status;
+            }
+        }
+
+        function syncControlsFromState() {
+            setVal('[data-name-a]', state.teamA.name);
+            setVal('[data-name-b]', state.teamB.name);
+            setVal('[data-abbr-a-in]', state.teamA.abbr);
+            setVal('[data-abbr-b-in]', state.teamB.abbr);
+            setSwatch('[data-color-a]', state.teamA.color);
+            setSwatch('[data-color-b]', state.teamB.color);
+            setVal('[data-badge-a-in]', state.teamA.badge);
+            setVal('[data-badge-b-in]', state.teamB.badge);
+            setText('[data-score-a-val]', state.scoreA);
+            setText('[data-score-b-val]', state.scoreB);
+            const logoChk = $('[data-show-logo]'); if (logoChk) logoChk.checked = !!state.showLogo;
+            markActiveStatus();
+            markActiveTheme();
+            markActiveLogo();
+        }
+
+        function setVal(sel, val) {
+            const el = $(sel);
+            if (!el) return;
+            if (document.activeElement !== el) el.value = val ?? '';
+        }
+
+        function setSwatch(sel, color) {
+            const el = $(sel);
+            if (el) el.style.background = color || '#000000';
+        }
+
+        /* ============================================================
+           API CLIENT — API-Football (api-sports.io v3)
+           Auth: header x-apisports-key. Direct endpoints are CORS-enabled,
+           so no proxy is needed. Free plan = 100 requests/day.
+           ============================================================ */
+        let selectedEvent = null;
+
+        function apiStatus(msg, kind = '') {
+            const el = $('[data-api-status]');
+            if (el) { el.textContent = msg; el.className = 'api-status ' + kind; }
+        }
+
+        function requireKey() {
+            if (!CONFIG.API_KEY) { apiStatus('Paste your api-sports.io key first.', 'err'); return false; }
+            return true;
+        }
+
+        /* ---- (A) daily request counter ----------------------------- */
+        function todayStr() { return new Date().toISOString().slice(0, 10); }
+        function quotaGet() {
+            try {
+                const q = JSON.parse(localStorage.getItem(CONFIG.QUOTA_STORE) || 'null');
+                if (q && q.date === todayStr()) return q;
+            } catch (e) { /* ignore */ }
+            return { date: todayStr(), count: 0 };
+        }
+        function quotaInc() {
+            const q = quotaGet(); q.count++;
+            try { localStorage.setItem(CONFIG.QUOTA_STORE, JSON.stringify(q)); } catch (e) { /* ignore */ }
+            renderQuota();
+        }
+        function overQuota() { return quotaGet().count >= CONFIG.DAILY_LIMIT; }
+        function renderQuota() {
+            const el = $('[data-api-quota]'); if (!el) return;
+            const q = quotaGet(); const left = CONFIG.DAILY_LIMIT - q.count;
+            el.textContent = `${q.count}/${CONFIG.DAILY_LIMIT}`;
+            el.title = `${Math.max(0, left)} API-Football requests left today`;
+            el.classList.toggle('warn', left <= 10 && left > 0);
+            el.classList.toggle('over', left <= 0);
+        }
+
+        /* ---- (B) TheSportsDB fallback: free, CORS-ok, no key.
+               No live feed and no elapsed minute; data can be delayed. ---- */
+        async function tsdbGet(path) { const r = await fetch(CONFIG.TSDB_BASE + path); return r.json(); }
+
+        function tsdbStatus(strStatus, strProgress) {
+            const s = (strStatus || '').toLowerCase();
+            const live = /^\d+$/.test((strProgress || '').trim()) && +strProgress > 0;
+            if (s.includes('finished') || s === 'ft' || s === 'aet' || s === 'pen') return 'FT';
+            if (s.includes('half')) return 'HT';
+            if (live) return 'LIVE';
+            return 'NS';
+        }
+
+        function normalizeTSDB(ev) {
+            return {
+                idEvent: 'tsdb:' + ev.idEvent,
+                tsdbId: ev.idEvent,
+                strHomeTeam: ev.strHomeTeam,
+                strAwayTeam: ev.strAwayTeam,
+                strHomeTeamBadge: ev.strHomeTeamBadge || '',
+                strAwayTeamBadge: ev.strAwayTeamBadge || '',
+                intHomeScore: ev.intHomeScore,
+                intAwayScore: ev.intAwayScore,
+                strLeague: ev.strLeague,
+                country: ev.strCountry || '',
+                dateEvent: ev.dateEvent || '',
+                minute: /^\d+$/.test((ev.strProgress || '').trim()) ? +ev.strProgress : null,
+                statusShort: tsdbStatus(ev.strStatus, ev.strProgress),
+                _provider: 'tsdb'
+            };
+        }
+
+        async function tsdbDay(date) {
+            const data = await tsdbGet(`/eventsday.php?d=${date}&s=Soccer`);
+            return (data.events || []).map(normalizeTSDB);
+        }
+        async function tsdbTeam(name) {
+            const t = await tsdbGet(`/searchteams.php?t=${encodeURIComponent(name)}`);
+            const team = t.teams && t.teams[0];
+            if (!team) return [];
+            const [last, next] = await Promise.all([
+                tsdbGet(`/eventslast.php?id=${team.idTeam}`).catch(() => ({})),
+                tsdbGet(`/eventsnext.php?id=${team.idTeam}`).catch(() => ({}))
+            ]);
+            return [].concat(last.results || [], next.events || []).map(normalizeTSDB);
+        }
+        async function tsdbRefresh(id) {
+            const data = await tsdbGet(`/lookupevent.php?id=${id}`);
+            const ev = data.events && data.events[0];
+            return ev ? normalizeTSDB(ev) : null;
+        }
+
+        // Run a TheSportsDB fallback for a load operation and populate the picker.
+        function runFallback(fn, label, err) {
+            if (!CONFIG.FALLBACK) { apiStatus('API error: ' + (err.message || err), 'err'); return Promise.resolve(); }
+            apiStatus('API-Football unavailable — trying TheSportsDB…');
+            return fn()
+                .then(evs => populateEvents(evs, label + ' (via TheSportsDB)'))
+                .catch(e2 => apiStatus('Both sources failed: ' + (e2.message || e2), 'err'));
+        }
+
+        async function apiGet(path) {
+            const url = (CONFIG.CORS_PROXY || '') + CONFIG.API_BASE + path;
+            const res = await fetch(url, { headers: { 'x-apisports-key': CONFIG.API_KEY } });
+            quotaInc();
+            const data = await res.json();
+            const errs = data && data.errors;
+            const hasErr = Array.isArray(errs) ? errs.length : (errs && Object.keys(errs).length);
+            if (hasErr) throw new Error(typeof errs === 'object' ? JSON.stringify(errs) : String(errs));
+            return data;
+        }
+
+        // Normalize an API-Football fixture into the shared event shape.
+        function normalize(f) {
+            const teams = f.teams || {}, goals = f.goals || {}, fx = f.fixture || {}, st = fx.status || {};
+            return {
+                idEvent: fx.id,
+                strHomeTeam: teams.home && teams.home.name,
+                strAwayTeam: teams.away && teams.away.name,
+                strHomeTeamBadge: teams.home && teams.home.logo,
+                strAwayTeamBadge: teams.away && teams.away.logo,
+                intHomeScore: goals.home,
+                intAwayScore: goals.away,
+                strLeague: f.league && f.league.name,
+                country: f.league && f.league.country,
+                dateEvent: fx.date ? fx.date.slice(0, 10) : '',
+                minute: Number.isFinite(st.elapsed) ? st.elapsed : null,
+                statusShort: st.short || '',
+                _provider: 'apif'
+            };
+        }
+
+        let apiEvents = [];
+        let matchStatusFilter = '';   // '', 'live', 'upcoming', 'finished'
+
+        function populateEvents(events, label) {
+            apiEvents = events;
+            selectedEvent = null;
+            if (!events.length) {
+                apiStatus(`No matches found ${label}. You can still set everything manually.`, 'err');
+                return;
+            }
+            apiStatus(`Loaded ${events.length} match(es) ${label}. Filter & pick.`, 'ok');
+            const s = $('[data-match-search]'); if (s) s.value = '';
+            openMatchModal();
+        }
+
+        /* ---- searchable match picker ---- */
+        function openMatchModal() {
+            const modal = $('[data-match-modal]'); if (!modal) return;
+            modal.classList.remove('hidden');
+            renderMatchList();
+            const s = $('[data-match-search]'); if (s) setTimeout(() => s.focus(), 0);
+        }
+
+        function closeMatchModal() {
+            const modal = $('[data-match-modal]'); if (modal) modal.classList.add('hidden');
+        }
+
+        function statusGroup(s) {
+            s = (s || '').toUpperCase();
+            if (['1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE', 'INT'].includes(s)) return 'live';
+            if (['FT', 'AET', 'PEN', 'AWD', 'WO'].includes(s)) return 'finished';
+            return 'upcoming';
+        }
+
+        function matchRowText(ev) {
+            const g = statusGroup(ev.statusShort);
+            const score = (g === 'live' || g === 'finished') ? `${ev.intHomeScore ?? 0}–${ev.intAwayScore ?? 0}` : 'vs';
+            const place = ev.strLeague ? `${ev.strLeague}${ev.country ? ' · ' + ev.country : ''}` : (ev.country || '');
+            return `${ev.strHomeTeam} ${score} ${ev.strAwayTeam}  —  ${place}${ev.statusShort ? ' [' + ev.statusShort + ']' : ''}`;
+        }
+
+        function renderMatchList() {
+            const list = $('[data-match-list]'); if (!list) return;
+            const q = ($('[data-match-search]').value || '').toLowerCase().trim();
+            const tokens = q ? q.split(/\s+/) : [];
+            list.innerHTML = '';
+            let count = 0;
+            apiEvents.forEach(ev => {
+                if (matchStatusFilter && statusGroup(ev.statusShort) !== matchStatusFilter) return;
+                const hay = `${ev.strHomeTeam} ${ev.strAwayTeam} ${ev.strLeague || ''} ${ev.country || ''}`.toLowerCase();
+                if (tokens.length && !tokens.every(t => hay.includes(t))) return;
+                const item = document.createElement('div');
+                item.className = 'dd-item';
+                item.textContent = matchRowText(ev);
+                item.addEventListener('click', () => selectMatch(ev));
+                list.appendChild(item);
+                count++;
+            });
+            if (!count) list.innerHTML = '<div class="dd-empty">No matches — try fewer words or another filter.</div>';
+            const c = $('[data-match-count]'); if (c) c.textContent = `${count} shown / ${apiEvents.length} loaded`;
+        }
+
+        function selectMatch(ev) {
+            selectedEvent = ev;
+            const t = $('[data-match-open]'); if (t) t.textContent = `${ev.strHomeTeam} v ${ev.strAwayTeam}`;
+            applySelectedApiMatch();
+            closeMatchModal();
+            startLivePoll();   // relay matches auto-update every RELAY_POLL_MS until FT
+        }
+
+        /* ---- color picker popup (native <input type=color> is invisible in OBS) ---- */
+        let colorTarget = 'A';
+        const COLOR_PALETTE = ['#FFFFFF', '#000000', '#3150F6', '#1D2182', '#82B1FF', '#D60000', '#751312',
+            '#FF3B01', '#E6007E', '#01C853', '#004C40', '#B0E906', '#FDEF42', '#FF8A00', '#8B5E3C', '#9AA0C2'];
+
+        function normalizeHex(h) {
+            h = (h || '').trim();
+            if (h[0] !== '#') h = '#' + h;
+            if (/^#[0-9a-f]{3}$/i.test(h)) h = '#' + h.slice(1).split('').map(c => c + c).join('');
+            return /^#[0-9a-f]{6}$/i.test(h) ? h.toUpperCase() : '#000000';
+        }
+        function hexToRgb(h) { h = normalizeHex(h).slice(1); return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16) }; }
+        function rgbToHex(r, g, b) { const t = n => ('0' + Math.max(0, Math.min(255, n | 0)).toString(16)).slice(-2); return ('#' + t(r) + t(g) + t(b)).toUpperCase(); }
+        function colorTeam() { return colorTarget === 'A' ? state.teamA : state.teamB; }
+
+        function openColorModal(t) {
+            colorTarget = t;
+            $('[data-color-title]').textContent = 'Team ' + t + ' colour';
+            buildPalette();
+            loadColorControls(colorTeam().color || '#000000');
+            $('[data-color-modal]').classList.remove('hidden');
+        }
+        function closeColorModal() { const m = $('[data-color-modal]'); if (m) m.classList.add('hidden'); }
+
+        function loadColorControls(hex) {
+            hex = normalizeHex(hex);
+            $('[data-color-preview]').style.background = hex;
+            const hx = $('[data-color-hex]'); if (document.activeElement !== hx) hx.value = hex;
+            const { r, g, b } = hexToRgb(hex);
+            $('[data-rgb-r]').value = r; $('[data-rgb-g]').value = g; $('[data-rgb-b]').value = b;
+        }
+        function applyColor(hex) {
+            hex = normalizeHex(hex);
+            colorTeam().color = hex;
+            $('[data-color-preview]').style.background = hex;
+            setSwatch(colorTarget === 'A' ? '[data-color-a]' : '[data-color-b]', hex);
+            saveState();
+        }
+        function setColorFromHex(v) {
+            if (!/^#?[0-9a-f]{6}$/i.test((v || '').trim())) return;
+            const hex = normalizeHex(v);
+            const { r, g, b } = hexToRgb(hex);
+            $('[data-rgb-r]').value = r; $('[data-rgb-g]').value = g; $('[data-rgb-b]').value = b;
+            applyColor(hex);
+        }
+        function setColorFromSliders() {
+            const hex = rgbToHex(+$('[data-rgb-r]').value, +$('[data-rgb-g]').value, +$('[data-rgb-b]').value);
+            const hx = $('[data-color-hex]'); if (document.activeElement !== hx) hx.value = hex;
+            applyColor(hex);
+        }
+        function buildPalette() {
+            const wrap = $('[data-color-palette]'); if (!wrap) return;
+            wrap.innerHTML = '';
+            COLOR_PALETTE.forEach(c => {
+                const b = document.createElement('button');
+                b.className = 'pal'; b.style.background = c; b.title = c;
+                b.addEventListener('click', () => { loadColorControls(c); applyColor(c); });
+                wrap.appendChild(b);
+            });
+        }
+
+        /* ---- (C) SofaScore relay (Cloudflare Worker) — primary live source.
+               Uncapped + real-time-ish; the page only polls the relay. ---- */
+        let livePollTimer = null;
+
+        function relayReady() { return !!CONFIG.RELAY_URL; }
+        async function relayGet(path) {
+            const r = await fetch(CONFIG.RELAY_URL + path);
+            if (!r.ok) throw new Error('relay ' + r.status);
+            return r.json();
+        }
+        function relayStatusShort(ev) {
+            if (ev.statusType === 'finished') return 'FT';
+            if (ev.statusType === 'notstarted') return 'NS';
+            if ((ev.statusDesc || '').toLowerCase().includes('halftime')) return 'HT';
+            return 'LIVE';
+        }
+        function normalizeRelay(ev) {
+            return {
+                idEvent: ev.id,
+                relayId: ev.id,
+                strHomeTeam: ev.home, strAwayTeam: ev.away,
+                homeAbbr: ev.homeAbbr, awayAbbr: ev.awayAbbr,
+                strHomeTeamBadge: ev.homeCrest || '',
+                strAwayTeamBadge: ev.awayCrest || '',
+                intHomeScore: ev.a, intAwayScore: ev.b,
+                strLeague: ev.league, country: ev.country || '',
+                dateEvent: ev.startTs ? new Date(ev.startTs * 1000).toISOString().slice(0, 10) : '',
+                minute: ev.minute,
+                statusShort: relayStatusShort(ev),
+                _provider: 'relay'
+            };
+        }
+
+        // Auto-poll the selected match through the relay (no API cap here).
+        function startLivePoll() {
+            stopLivePoll();
+            if (!relayReady() || !selectedEvent || selectedEvent._provider !== 'relay') return;
+            livePollTimer = setInterval(relayTick, CONFIG.RELAY_POLL_MS);
+        }
+        function stopLivePoll() { if (livePollTimer) { clearInterval(livePollTimer); livePollTimer = null; } }
+        async function relayTick() {
+            if (!selectedEvent || selectedEvent._provider !== 'relay') { stopLivePoll(); return; }
+            try {
+                const d = await relayGet('/match?id=' + encodeURIComponent(selectedEvent.relayId));
+                const ev = d.event ? normalizeRelay(d.event) : null;
+                if (!ev) return;
+                state.scoreA = toScore(ev.intHomeScore);
+                state.scoreB = toScore(ev.intAwayScore);
+                applyClockFromMinute(ev);
+                saveState(); syncControlsFromState();
+                if (ev.statusShort === 'FT') { apiStatus('Match finished — live updates stopped.', 'ok'); stopLivePoll(); }
+            } catch (e) { /* transient — try again next tick */ }
+        }
+
+        async function loadLive() {
+            if (relayReady()) {
+                apiStatus('Loading live matches (relay)…');
+                try {
+                    const d = await relayGet('/live');
+                    populateEvents((d.events || []).map(normalizeRelay), '(live now)');
+                } catch (e) { apiStatus('Relay error: ' + e.message + ' — check the Relay URL.', 'err'); }
+                return;
+            }
+            if (!requireKey()) return;
+            apiStatus('Loading live matches…');
+            try {
+                if (overQuota()) throw new Error('Daily request limit reached');
+                const data = await apiGet('/fixtures?live=all');
+                populateEvents((data.response || []).map(normalize), '(live now)');
+            } catch (e) {
+                if (!CONFIG.FALLBACK) { apiStatus('API error: ' + e.message, 'err'); return; }
+                apiStatus('API-Football unavailable — TheSportsDB has no live feed; loading today’s fixtures…');
+                try { populateEvents(await tsdbDay(todayStr()), '(today, via TheSportsDB)'); }
+                catch (e2) { apiStatus('Both sources failed: ' + (e2.message || e2), 'err'); }
+            }
+        }
+
+        async function loadByDate() {
+            const date = $('[data-api-date]').value;
+            if (!date) { apiStatus('Pick a date first.', 'err'); return; }
+            if (relayReady()) {
+                apiStatus('Loading matches (relay)…');
+                try {
+                    const d = await relayGet('/day?date=' + date);
+                    populateEvents((d.events || []).map(normalizeRelay), `for ${date}`);
+                } catch (e) { apiStatus('Relay error: ' + e.message + ' — check the Relay URL.', 'err'); }
+                return;
+            }
+            if (!requireKey()) return;
+            apiStatus('Loading day’s matches…');
+            try {
+                if (overQuota()) throw new Error('Daily request limit reached');
+                const data = await apiGet(`/fixtures?date=${date}`);
+                populateEvents((data.response || []).map(normalize), `for ${date}`);
+            } catch (e) {
+                await runFallback(() => tsdbDay(date), `for ${date}`, e);
+            }
+        }
+
+        async function loadByTeam() {
+            const name = ($('[data-api-team]').value || '').trim();
+            if (!name) { apiStatus('Type a team name first.', 'err'); return; }
+            if (relayReady()) {
+                apiStatus('Loading today’s matches to filter…');
+                try {
+                    const d = await relayGet('/day?date=' + todayStr());
+                    populateEvents((d.events || []).map(normalizeRelay), `for ${todayStr()}`);
+                    const s = $('[data-match-search]'); if (s) { s.value = name; renderMatchList(); }
+                } catch (e) { apiStatus('Relay error: ' + e.message + ' — check the Relay URL.', 'err'); }
+                return;
+            }
+            if (!requireKey()) return;
+            apiStatus('Searching team…');
+            try {
+                if (overQuota()) throw new Error('Daily request limit reached');
+                const tData = await apiGet(`/teams?search=${encodeURIComponent(name)}`);
+                const team = tData.response && tData.response[0] && tData.response[0].team;
+                if (!team) { apiStatus(`No team matched "${name}".`, 'err'); return; }
+                apiStatus(`Found ${team.name}. Loading fixtures…`);
+                const [last, next] = await Promise.all([
+                    apiGet(`/fixtures?team=${team.id}&last=10`).catch(() => ({})),
+                    apiGet(`/fixtures?team=${team.id}&next=10`).catch(() => ({}))
+                ]);
+                const events = [].concat(last.response || [], next.response || []).map(normalize);
+                populateEvents(events, `for ${team.name}`);
+            } catch (e) {
+                await runFallback(() => tsdbTeam(name), `for "${name}"`, e);
+            }
+        }
+
+        function applySelectedApiMatch() {
+            if (!selectedEvent) { apiStatus('Pick a match from the list first.', 'err'); return; }
+            fillFromEvent(selectedEvent);
+            state.source = 'api:' + (selectedEvent.idEvent || '');
+            saveState();
+            syncControlsFromState();
+            apiStatus('Filled from API. Enable auto-refresh to keep score + minute in sync, or edit manually.', 'ok');
+        }
+
+        function fillFromEvent(ev) {
+            if (ev.strHomeTeam) { state.teamA.name = ev.strHomeTeam; state.teamA.abbr = ev.homeAbbr || abbrOf(ev.strHomeTeam); }
+            if (ev.strAwayTeam) { state.teamB.name = ev.strAwayTeam; state.teamB.abbr = ev.awayAbbr || abbrOf(ev.strAwayTeam); }
+            if (ev.strHomeTeamBadge) state.teamA.badge = ev.strHomeTeamBadge;
+            if (ev.strAwayTeamBadge) state.teamB.badge = ev.strAwayTeamBadge;
+            state.scoreA = toScore(ev.intHomeScore);
+            state.scoreB = toScore(ev.intAwayScore);
+            applyClockFromMinute(ev);
+        }
+
+        // API-Football exposes the live elapsed minute — seed the clock from it.
+        function applyClockFromMinute(ev) {
+            const s = (ev.statusShort || '').toUpperCase();
+            const inPlay = ['1H', '2H', 'ET', 'LIVE', 'P'].includes(s);
+            if (Number.isFinite(ev.minute)) {
+                state.clock.base = ev.minute * 60;
+                state.clock.since = Date.now();
+                state.clock.running = inPlay;
+            }
+            if (s === 'NS') return;   // upcoming match — don't force a live status
+            state.status = mapStatus(ev);
+        }
+
+        function toScore(v) {
+            const n = parseInt(v, 10);
+            return Number.isFinite(n) ? n : 0;
+        }
+
+        async function refreshScore() {
+            if (!selectedEvent || !selectedEvent.idEvent) return false;
+            let ev;
+            if (selectedEvent._provider === 'relay') {
+                const d = await relayGet('/match?id=' + encodeURIComponent(selectedEvent.relayId));
+                ev = d.event ? normalizeRelay(d.event) : null;
+            } else if (selectedEvent._provider === 'tsdb') {
+                ev = await tsdbRefresh(selectedEvent.tsdbId);
+            } else if (overQuota() && CONFIG.FALLBACK) {
+                throw new Error('Daily limit reached — re-load this match (Live/Day/Find) so it comes from TheSportsDB, then Refresh.');
+            } else {
+                const data = await apiGet(`/fixtures?id=${selectedEvent.idEvent}`);
+                const f = data.response && data.response[0];
+                ev = f ? normalize(f) : null;
+            }
+            if (!ev) return false;
+            state.scoreA = toScore(ev.intHomeScore);
+            state.scoreB = toScore(ev.intAwayScore);
+            applyClockFromMinute(ev);
+            saveState(); syncControlsFromState();
+            return true;
+        }
+
+        // Manual one-shot refresh (no polling — avoids silently draining the quota).
+        async function manualRefresh() {
+            if (!selectedEvent || !selectedEvent.idEvent) { apiStatus('Pick a match first, then Refresh.', 'err'); return; }
+            apiStatus('Refreshing…');
+            try {
+                const ok = await refreshScore();
+                apiStatus(ok ? 'Score refreshed from API.' : 'No data returned for this match.', ok ? 'ok' : 'err');
+            } catch (e) {
+                apiStatus('Refresh error: ' + e.message, 'err');
+            }
+        }
+
+        // Map API-Football status short code -> our status label.
+        function mapStatus(ev) {
+            const s = (ev.statusShort || '').toUpperCase();
+            if (s === 'HT') return 'HT';
+            if (['FT', 'AET', 'PEN'].includes(s)) return 'FT';
+            if (['1H', '2H', 'ET', 'LIVE', 'P', 'NS'].includes(s)) return 'LIVE';
+            return ev.statusShort || 'LIVE';
+        }
+    </script>
+</body>
+
+</html>
