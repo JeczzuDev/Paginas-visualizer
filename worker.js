@@ -87,11 +87,14 @@ async function getLeagues() {
 function numScore(s) { const n = parseInt(s, 10); return Number.isFinite(n) ? n : null; }
 
 // Live elapsed minute from ESPN's status (only while in progress).
+// status.clock is capped at the regular time (5400s) so it CAN'T show stoppage;
+// the added time lives only in displayClock ("90'+7'") -> parse base + extra.
 function minuteFrom(st) {
   if (!st.type || st.type.state !== 'in') return null;
   if ((st.type.description || '').toLowerCase().includes('halftime')) return 45;
-  const m = parseInt(st.displayClock || '', 10);   // "45'", "90'+7'" -> 45 / 90
-  return Number.isFinite(m) ? m : null;
+  const m = /(\d+)'(?:\s*\+\s*(\d+))?/.exec(st.displayClock || '');   // "90'+7'" -> 90 + 7
+  if (!m) return null;
+  return parseInt(m[1], 10) + (m[2] ? parseInt(m[2], 10) : 0);
 }
 
 function slim(e, leagueName, slug) {
