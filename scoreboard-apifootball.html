@@ -1787,6 +1787,7 @@
         function startLivePoll() {
             stopLivePoll();
             if (!relayReady() || !selectedEvent || selectedEvent._provider !== 'relay') return;
+            if (selectedEvent.statusShort === 'FT') return;   // finished — clock already frozen, no need to poll
             livePollTimer = setInterval(relayTick, CONFIG.RELAY_POLL_MS);
         }
         function stopLivePoll() { if (livePollTimer) { clearInterval(livePollTimer); livePollTimer = null; } }
