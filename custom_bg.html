@@ -1,0 +1,817 @@
+<!--
+- Customizable single-file SVG animated background (OBS Browser Source friendly)
+- Inspired by the bg family, especially wc2026_bg.html.
+-
+- HOW TO USE IN OBS
+- * Add as a Browser Source pointing at this file.
+- * Click anywhere on the source to open the color popup (requires the source's
+-   right-click > "Interact" window, or interaction enabled).
+- * Each shape + the background has a swatch that opens a custom in-page color
+-   picker (drawn inside the page, so it stays visible in OBS — unlike the native
+-   OS color dialog). Colors apply live; each one auto-derives a drifting
+-   light/dark gradient. A hex field lets you type/paste an exact value.
+- * The copy button on each row copies that color's hex.
+- * Choices are saved in localStorage (persists per browser source).
+- * "Copy URL" exports the current palette as query params (?c=hex-hex-...&bg=hex).
+-   Paste such a URL into the "Paste palette URL" box and hit Load to import it
+-   (keyboard paste works in OBS even though clipboard READ is blocked there).
+-   URL params also win over saved/default colors on initial load.
+-->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Custom Animated Background</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            padding: 0;
+            margin: 0;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+        }
+
+        svg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100vh;
+            cursor: pointer;
+        }
+
+        @keyframes rotate {
+            0% {
+                transform: scale(1) rotate(0deg);
+            }
+
+            100% {
+                transform: scale(1.5) rotate(360deg);
+            }
+        }
+
+        @keyframes rotateOnly {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .out-top {
+            animation: rotate 20s ease-in-out infinite alternate;
+            transform-origin: 13px 25px;
+        }
+
+        .in-top {
+            animation: rotate 10s ease-in-out infinite alternate;
+            transform-origin: 13px 25px;
+        }
+
+        .top-mid-1 {
+            animation: rotate 18s linear infinite alternate, rotateOnly 18s linear infinite;
+            transform-origin: 13px 25px;
+        }
+
+        .out-bottom {
+            animation: rotate 25s ease-in-out infinite alternate;
+            transform-origin: 84px 93px;
+        }
+
+        .in-bottom {
+            animation: rotate 15s ease-in-out infinite alternate;
+            transform-origin: 84px 93px;
+        }
+
+        .mid-1 {
+            animation: rotate 12s linear infinite alternate, rotateOnly 12s linear infinite;
+            transform-origin: 84px 93px;
+        }
+
+        /* ----- Color popup ----- */
+        #panel {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.96);
+            width: min(340px, 92vw);
+            max-height: 92vh;
+            overflow: auto;
+            background: rgba(22, 24, 28, 0.96);
+            color: #f1f1f1;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 14px;
+            padding: 16px 18px;
+            font-family: system-ui, "Segoe UI", sans-serif;
+            box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.16s ease, transform 0.16s ease;
+            z-index: 10;
+            backdrop-filter: blur(3px);
+        }
+
+        #panel.open {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translate(-50%, -50%) scale(1);
+        }
+
+        #panel h2 {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 2px;
+        }
+
+        #panel .hint {
+            font-size: 11px;
+            opacity: 0.6;
+            margin-bottom: 12px;
+            line-height: 1.4;
+        }
+
+        .row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 5px 0;
+        }
+
+        .row label {
+            font-size: 13px;
+        }
+
+        .row input[type="color"] {
+            width: 46px;
+            height: 28px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            background: none;
+            padding: 0;
+            cursor: pointer;
+        }
+
+        .divider {
+            height: 1px;
+            background: rgba(255, 255, 255, 0.12);
+            margin: 10px 0;
+        }
+
+        .section-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            opacity: 0.55;
+            margin-bottom: 6px;
+        }
+
+        .presets {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .presets button,
+        .actions button {
+            font: inherit;
+            font-size: 12px;
+            padding: 6px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.06);
+            color: #f1f1f1;
+            cursor: pointer;
+        }
+
+        .presets button:hover,
+        .actions button:hover {
+            background: rgba(255, 255, 255, 0.16);
+        }
+
+        .actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 12px;
+        }
+
+        .actions button {
+            flex: 1;
+        }
+
+        .actions button.primary {
+            background: #3150f6;
+            border-color: #3150f6;
+        }
+
+        .actions button.primary:hover {
+            background: #4762ff;
+        }
+
+        /* ----- Per-color row controls ----- */
+        .ctrl {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .swatch {
+            width: 30px;
+            height: 26px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            cursor: pointer;
+            padding: 0;
+        }
+
+        .hex {
+            font-family: ui-monospace, "Consolas", monospace;
+            font-size: 12px;
+            opacity: 0.8;
+            min-width: 62px;
+            text-align: right;
+        }
+
+        .copy {
+            font: inherit;
+            font-size: 13px;
+            line-height: 1;
+            width: 26px;
+            height: 26px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.06);
+            color: #f1f1f1;
+            cursor: pointer;
+        }
+
+        .copy:hover {
+            background: rgba(255, 255, 255, 0.16);
+        }
+
+        .urlrow {
+            display: flex;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        .urlrow input {
+            flex: 1;
+            min-width: 0;
+            font: inherit;
+            font-size: 12px;
+            padding: 6px 8px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.06);
+            color: #f1f1f1;
+        }
+
+        .urlrow button {
+            font: inherit;
+            font-size: 12px;
+            padding: 6px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.06);
+            color: #f1f1f1;
+            cursor: pointer;
+        }
+
+        .urlrow button:hover {
+            background: rgba(255, 255, 255, 0.16);
+        }
+
+        /* ----- Custom in-page color picker (OBS-friendly) ----- */
+        #picker {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.96);
+            width: min(280px, 90vw);
+            background: rgba(18, 20, 24, 0.98);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 14px;
+            padding: 14px;
+            font-family: system-ui, "Segoe UI", sans-serif;
+            color: #f1f1f1;
+            box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.16s ease, transform 0.16s ease;
+            z-index: 30;
+        }
+
+        #picker.open {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translate(-50%, -50%) scale(1);
+        }
+
+        .pk-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+            margin-bottom: 10px;
+        }
+
+        .pk-head button {
+            background: none;
+            border: none;
+            color: #f1f1f1;
+            font-size: 16px;
+            cursor: pointer;
+            opacity: 0.7;
+            line-height: 1;
+        }
+
+        .pk-sv {
+            position: relative;
+            width: 100%;
+            height: 150px;
+            border-radius: 8px;
+            cursor: crosshair;
+            touch-action: none;
+        }
+
+        .pk-hue {
+            position: relative;
+            width: 100%;
+            height: 14px;
+            margin-top: 12px;
+            border-radius: 7px;
+            cursor: pointer;
+            touch-action: none;
+            background: linear-gradient(to right, #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%);
+        }
+
+        .pk-handle {
+            position: absolute;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            border: 2px solid #fff;
+            box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+
+        .pk-handle-h {
+            top: 50%;
+            width: 6px;
+            height: 20px;
+            border-radius: 3px;
+        }
+
+        .pk-foot {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .pk-preview {
+            width: 26px;
+            height: 26px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            flex: none;
+        }
+
+        .pk-hex {
+            flex: 1;
+            min-width: 0;
+            font-family: ui-monospace, "Consolas", monospace;
+            font-size: 13px;
+            text-transform: uppercase;
+            padding: 6px 8px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.06);
+            color: #f1f1f1;
+        }
+
+        .pk-foot button.primary {
+            font: inherit;
+            font-size: 12px;
+            padding: 6px 12px;
+            border-radius: 8px;
+            border: 1px solid #3150f6;
+            background: #3150f6;
+            color: #fff;
+            cursor: pointer;
+        }
+
+        #toast {
+            position: fixed;
+            bottom: 18px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.85);
+            color: #fff;
+            font-family: system-ui, sans-serif;
+            font-size: 13px;
+            padding: 8px 14px;
+            border-radius: 8px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+            z-index: 20;
+        }
+
+        #toast.show {
+            opacity: 1;
+        }
+    </style>
+</head>
+
+<body>
+    <svg id="stage" preserveAspectRatio="xMidYMid slice" viewBox="10 10 80 80">
+        <defs id="defs"></defs>
+        <rect x="10" y="10" width="80" height="80" fill="url(#skyGrad)" />
+        <path class="out-top" fill="url(#grad0)" data-i="0"
+            d="M37-5C25.1-14.7,5.7-19.1-9.2-10-28.5,1.8-32.7,31.1-19.8,49c15.5,21.5,52.6,22,67.2,2.3C59.4,35,53.7,8.5,37-5Z" />
+        <path class="in-top" fill="url(#grad1)" data-i="1"
+            d="M36,0c-11.5-7.5-28-4.5-38,1.5-16.5,10.5-20.5,34-8,50.5s33.5,12,45.5-7.5C45,32,44,12,36,0Z" />
+        <path class="top-mid-1" fill="url(#grad2)" data-i="2"
+            d="M35,6c-9-6-21.5-3.5-30,2-14,9-17.5,30-5,43s28.5,10,37.5-8.5C40,30,40,14,35,6Z" />
+        <path class="out-bottom" fill="url(#grad3)" data-i="3"
+            d="M105.9,48.6c-12.4-8.2-29.3-4.8-39.4.8-23.4,12.8-37.7,51.9-19.1,74.1s63.9,15.3,76-5.6c7.6-13.3,1.8-31.1-2.3-43.8C117.6,63.3,114.7,54.3,105.9,48.6Z" />
+        <path class="in-bottom" fill="url(#grad4)" data-i="4"
+            d="M 104 55 c -12.2 -8 -28 -5 -38 0.5 c -18.5 12.5 -24 39 -9 58.5 s 40.5 15 52.5 -8.5 C 120 80 115.5 66 104 55 Z" />
+        <path class="mid-1" fill="url(#grad5)" data-i="5"
+            d="M103,60c-10.5-7-23.5-4-32,2-15,10.5-19,34-7,50.5s33.5,12,45.5-7.5C114,98,113,70,103,60Z" />
+    </svg>
+
+    <div id="panel">
+        <h2>Background colors</h2>
+        <div class="hint">Click the background to toggle this panel. Esc closes it.</div>
+
+        <div class="section-title">Shapes</div>
+        <div id="shapeRows"></div>
+
+        <div class="divider"></div>
+        <div id="bgRow"></div>
+
+        <div class="divider"></div>
+        <div class="section-title">Presets</div>
+        <div class="presets" id="presets"></div>
+
+        <div class="actions">
+            <button id="copyUrl" class="primary">Copy URL</button>
+            <button id="reset">Reset</button>
+        </div>
+        <div class="urlrow">
+            <input id="urlInput" aria-label="Palette URL" placeholder="Paste palette URL…" spellcheck="false" />
+            <button id="loadUrl">Load</button>
+        </div>
+    </div>
+
+    <div id="picker">
+        <div class="pk-head"><span id="pkLabel">Color</span><button id="pkClose" title="Close">✕</button></div>
+        <div class="pk-sv" id="pkSV"><div class="pk-handle" id="pkSVHandle"></div></div>
+        <div class="pk-hue" id="pkHue"><div class="pk-handle pk-handle-h" id="pkHueHandle"></div></div>
+        <div class="pk-foot">
+            <span class="pk-preview" id="pkPreview"></span>
+            <input class="pk-hex" id="pkHex" aria-label="Hex color value" maxlength="7" spellcheck="false" />
+            <button class="primary" id="pkDone">Done</button>
+        </div>
+    </div>
+
+    <div id="toast"></div>
+
+    <script>
+        const SVG_NS = "http://www.w3.org/2000/svg";
+        const SHAPE_COUNT = 6;
+        const SHAPE_LABELS = ["Top — outer", "Top — middle", "Top — inner",
+            "Bottom — outer", "Bottom — middle", "Bottom — inner"];
+        // Per-shape gradient drift duration (seconds), staggered for variety.
+        const DUR = [13, 10, 16, 14, 11, 9];
+        const STORE_KEY = "customBgPalette";
+
+        const PRESETS = {
+            "WC26": { shapes: ["#2A398D", "#E61D25", "#3CAC3B", "#2A398D", "#3CAC3B", "#E61D25"], bg: "#D1D4D1" },
+            "Dark": { shapes: ["#363636", "#424242", "#4e4e4e", "#363636", "#4e4e4e", "#292929"], bg: "#1d1d1d" },
+            "Red / Blue": { shapes: ["#a80000", "#004c93", "#00417e", "#004c93", "#a80000", "#00417e"], bg: "#0057a8" },
+            "Pink": { shapes: ["#c97aa6", "#7e62a8", "#d97fae", "#b977a8", "#e893b0", "#7e6fb0"], bg: "#d488ac" },
+            "Orange": { shapes: ["#cc4b00", "#ff5e00", "#ff8c33", "#ff7a00", "#fcca7c", "#f2a08e"], bg: "#cc4b00" }
+        };
+
+        /* ---------- color math ---------- */
+        function hexToRgb(hex) {
+            hex = hex.replace("#", "");
+            if (hex.length === 3) hex = hex.split("").map(c => c + c).join("");
+            const n = parseInt(hex, 16);
+            return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+        }
+        function rgbToHsl({ r, g, b }) {
+            r /= 255; g /= 255; b /= 255;
+            const max = Math.max(r, g, b), min = Math.min(r, g, b);
+            let h = 0, s = 0; const l = (max + min) / 2;
+            if (max !== min) {
+                const d = max - min;
+                s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                switch (max) {
+                    case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                    case g: h = (b - r) / d + 2; break;
+                    default: h = (r - g) / d + 4;
+                }
+                h /= 6;
+            }
+            return { h: h * 360, s: s * 100, l: l * 100 };
+        }
+        function hslToHex({ h, s, l }) {
+            h /= 360; s /= 100; l /= 100;
+            const f = n => {
+                const k = (n + h * 12) % 12;
+                const a = s * Math.min(l, 1 - l);
+                const v = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+                return Math.round(255 * v).toString(16).padStart(2, "0");
+            };
+            return "#" + f(0) + f(8) + f(4);
+        }
+        function shade(hex, dL) {
+            const hsl = rgbToHsl(hexToRgb(hex));
+            hsl.l = Math.max(0, Math.min(100, hsl.l + dL));
+            return hslToHex(hsl);
+        }
+
+        /* ---------- gradient builders ---------- */
+        function makeAnimate(values, dur) {
+            const a = document.createElementNS(SVG_NS, "animate");
+            a.setAttribute("attributeName", "stop-color");
+            a.setAttribute("values", values);
+            a.setAttribute("dur", dur + "s");
+            a.setAttribute("repeatCount", "indefinite");
+            return a;
+        }
+        function makeStop(offset, values, dur) {
+            const s = document.createElementNS(SVG_NS, "stop");
+            s.setAttribute("offset", offset);
+            s.setAttribute("stop-color", values.split(";")[0]);
+            s.appendChild(makeAnimate(values, dur));
+            return s;
+        }
+        function buildShapeGrad(id, base, dur) {
+            const g = document.createElementNS(SVG_NS, "linearGradient");
+            g.setAttribute("id", id);
+            g.setAttribute("x1", "0"); g.setAttribute("y1", "0");
+            g.setAttribute("x2", "1"); g.setAttribute("y2", "1");
+            const light = shade(base, 12), dark = shade(base, -14), darker = shade(base, -26);
+            g.appendChild(makeStop("0%", `${base};${light};${dark};${light};${base}`, dur));
+            g.appendChild(makeStop("100%", `${dark};${base};${darker};${base};${dark}`, dur));
+            return g;
+        }
+        function buildSkyGrad(base) {
+            const g = document.createElementNS(SVG_NS, "linearGradient");
+            g.setAttribute("id", "skyGrad");
+            g.setAttribute("x1", "0"); g.setAttribute("y1", "0");
+            g.setAttribute("x2", "0"); g.setAttribute("y2", "1");
+            const top = shade(base, 7), bot = shade(base, -7);
+            g.appendChild(makeStop("0%", `${top};${base};${bot};${base};${top}`, 16));
+            g.appendChild(makeStop("100%", `${bot};${top};${base};${top};${bot}`, 16));
+            return g;
+        }
+
+        /* ---------- state ---------- */
+        const defs = document.getElementById("defs");
+        let palette = { shapes: [], bg: "" };
+
+        const rowUpdaters = [];
+        function paint() {
+            defs.querySelectorAll("linearGradient").forEach(n => n.remove());
+            defs.appendChild(buildSkyGrad(palette.bg));
+            palette.shapes.forEach((c, i) => defs.appendChild(buildShapeGrad("grad" + i, c, DUR[i])));
+            document.documentElement.style.background = palette.bg;
+        }
+        // Coalesce rapid changes (e.g. dragging the picker) into one repaint/frame
+        // so we don't rebuild the SMIL gradients dozens of times per second.
+        let paintScheduled = false;
+        function schedulePaint() {
+            if (paintScheduled) return;
+            paintScheduled = true;
+            requestAnimationFrame(() => { paintScheduled = false; paint(); });
+        }
+        function refreshRows() { rowUpdaters.forEach(fn => fn()); }
+        function setPalette(p, { save = true } = {}) {
+            palette = { shapes: p.shapes.slice(), bg: p.bg };
+            schedulePaint();
+            refreshRows();
+            if (save) localStorage.setItem(STORE_KEY, JSON.stringify(palette));
+        }
+
+        /* ---------- load order: URL > storage > default ---------- */
+        function isHex(v) { return /^#?[0-9a-fA-F]{6}$/.test(v); }
+        function norm(v) { return v[0] === "#" ? v : "#" + v; }
+        function paletteFromQuery(q, fallbackBg) {
+            if (!q.has("c")) return null;
+            const cs = q.get("c").split("-").filter(isHex).map(norm);
+            if (cs.length !== SHAPE_COUNT) return null;
+            const bg = q.has("bg") && isHex(q.get("bg")) ? norm(q.get("bg")) : fallbackBg;
+            return { shapes: cs, bg };
+        }
+        function paletteFromText(text, fallbackBg) {
+            let qs = (text || "").trim();
+            const i = qs.indexOf("?");
+            if (i >= 0) qs = qs.slice(i + 1);
+            return paletteFromQuery(new URLSearchParams(qs), fallbackBg);
+        }
+        function loadInitial() {
+            const fromUrl = paletteFromQuery(new URLSearchParams(location.search), PRESETS.WC26.bg);
+            if (fromUrl) return fromUrl;
+            try {
+                const saved = JSON.parse(localStorage.getItem(STORE_KEY));
+                if (saved && saved.shapes && saved.shapes.length === SHAPE_COUNT) return saved;
+            } catch (e) { /* ignore malformed saved palette */ }
+            return PRESETS.WC26;
+        }
+
+        /* ---------- UI wiring ---------- */
+        const panel = document.getElementById("panel");
+
+        // Build a color row: swatch (opens picker) + hex label + copy button.
+        function makeRow(parent, label, get, set) {
+            const row = document.createElement("div");
+            row.className = "row";
+            row.innerHTML =
+                `<label>${label}</label>` +
+                `<div class="ctrl">` +
+                `<button class="swatch" type="button" title="Edit color"></button>` +
+                `<span class="hex"></span>` +
+                `<button class="copy" type="button" title="Copy hex">⧉</button>` +
+                `</div>`;
+            parent.appendChild(row);
+            const swatch = row.querySelector(".swatch");
+            const hexEl = row.querySelector(".hex");
+            const update = () => {
+                const c = get();
+                swatch.style.background = c;
+                hexEl.textContent = c.toUpperCase();
+            };
+            swatch.addEventListener("click", () => openPicker(label, get(), c => { set(c); update(); }));
+            row.querySelector(".copy").addEventListener("click", () => {
+                const c = get().toUpperCase();
+                navigator.clipboard.writeText(c).then(() => toast("Copied " + c), () => toast(c));
+            });
+            rowUpdaters.push(update);
+        }
+
+        const shapeRowsEl = document.getElementById("shapeRows");
+        for (let i = 0; i < SHAPE_COUNT; i++) {
+            makeRow(shapeRowsEl, SHAPE_LABELS[i],
+                () => palette.shapes[i],
+                c => { palette.shapes[i] = c; setPalette(palette); });
+        }
+        makeRow(document.getElementById("bgRow"), "Background",
+            () => palette.bg,
+            c => { palette.bg = c; setPalette(palette); });
+
+        const presetWrap = document.getElementById("presets");
+        Object.keys(PRESETS).forEach(name => {
+            const b = document.createElement("button");
+            b.textContent = name;
+            b.addEventListener("click", () => setPalette(PRESETS[name]));
+            presetWrap.appendChild(b);
+        });
+
+        function toast(msg) {
+            const t = document.getElementById("toast");
+            t.textContent = msg;
+            t.classList.add("show");
+            clearTimeout(toast._t);
+            toast._t = setTimeout(() => t.classList.remove("show"), 1800);
+        }
+        document.getElementById("copyUrl").addEventListener("click", () => {
+            const c = palette.shapes.map(h => h.replace("#", "")).join("-");
+            const bg = palette.bg.replace("#", "");
+            const url = location.origin + location.pathname + `?c=${c}&bg=${bg}`;
+            navigator.clipboard.writeText(url).then(
+                () => toast("OBS URL copied to clipboard"),
+                () => toast(url)
+            );
+        });
+        function applyPasted(text) {
+            const p = paletteFromText(text, palette.bg);
+            if (p) { setPalette(p); toast("Palette loaded from URL"); }
+            else toast("No valid palette found");
+        }
+        document.getElementById("loadUrl").addEventListener("click", () => {
+            applyPasted(document.getElementById("urlInput").value);
+        });
+        document.getElementById("urlInput").addEventListener("keydown", e => {
+            if (e.key === "Enter") applyPasted(e.target.value);
+        });
+        document.getElementById("reset").addEventListener("click", () => setPalette(PRESETS.WC26));
+
+        /* ---------- custom HSV color picker (renders in-page, OBS-visible) ---------- */
+        function rgbToHsv({ r, g, b }) {
+            r /= 255; g /= 255; b /= 255;
+            const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+            let h = 0;
+            if (d) {
+                if (max === r) h = ((g - b) / d) % 6;
+                else if (max === g) h = (b - r) / d + 2;
+                else h = (r - g) / d + 4;
+                h *= 60; if (h < 0) h += 360;
+            }
+            return { h, s: max === 0 ? 0 : d / max, v: max };
+        }
+        function hsvToHex(h, s, v) {
+            const f = n => {
+                const k = (n + h / 60) % 6;
+                const val = v - v * s * Math.max(0, Math.min(k, 4 - k, 1));
+                return Math.round(val * 255).toString(16).padStart(2, "0");
+            };
+            return "#" + f(5) + f(3) + f(1);
+        }
+
+        const picker = document.getElementById("picker");
+        const pkSV = document.getElementById("pkSV");
+        const pkSVHandle = document.getElementById("pkSVHandle");
+        const pkHue = document.getElementById("pkHue");
+        const pkHueHandle = document.getElementById("pkHueHandle");
+        const pkPreview = document.getElementById("pkPreview");
+        const pkHex = document.getElementById("pkHex");
+        const pk = { h: 0, s: 0, v: 0, onChange: null };
+
+        function renderPicker(updateHexField = true) {
+            const hex = hsvToHex(pk.h, pk.s, pk.v);
+            pkSV.style.background =
+                `linear-gradient(to top, #000, transparent),` +
+                `linear-gradient(to right, #fff, transparent),` +
+                `hsl(${pk.h}, 100%, 50%)`;
+            pkSVHandle.style.left = pk.s * 100 + "%";
+            pkSVHandle.style.top = (1 - pk.v) * 100 + "%";
+            pkHueHandle.style.left = pk.h / 360 * 100 + "%";
+            pkPreview.style.background = hex;
+            if (updateHexField) pkHex.value = hex.toUpperCase();
+            if (pk.onChange) pk.onChange(hex);
+        }
+        function openPicker(label, color, onChange) {
+            pk.onChange = onChange;
+            const hsv = rgbToHsv(hexToRgb(color));
+            pk.h = hsv.h; pk.s = hsv.s; pk.v = hsv.v;
+            document.getElementById("pkLabel").textContent = label;
+            picker.classList.add("open");
+            panel.classList.add("open");
+            renderPicker();
+        }
+        function closePicker() { picker.classList.remove("open"); pk.onChange = null; }
+
+        const clamp = n => Math.max(0, Math.min(1, n));
+        function bindDrag(el, onMove) {
+            const at = e => {
+                const r = el.getBoundingClientRect();
+                onMove(clamp((e.clientX - r.left) / r.width), clamp((e.clientY - r.top) / r.height));
+            };
+            el.addEventListener("pointerdown", e => {
+                el.setPointerCapture(e.pointerId);
+                at(e);
+                const move = ev => at(ev);
+                const up = () => {
+                    el.removeEventListener("pointermove", move);
+                    el.removeEventListener("pointerup", up);
+                };
+                el.addEventListener("pointermove", move);
+                el.addEventListener("pointerup", up);
+            });
+        }
+        bindDrag(pkSV, (x, y) => { pk.s = x; pk.v = 1 - y; renderPicker(); });
+        bindDrag(pkHue, x => { pk.h = x * 360; renderPicker(); });
+        pkHex.addEventListener("input", e => {
+            if (!isHex(e.target.value)) return;
+            const hsv = rgbToHsv(hexToRgb(norm(e.target.value)));
+            pk.h = hsv.h; pk.s = hsv.s; pk.v = hsv.v;
+            renderPicker(false);
+        });
+        document.getElementById("pkDone").addEventListener("click", closePicker);
+        document.getElementById("pkClose").addEventListener("click", closePicker);
+
+        // Click background to toggle the panel; the picker (if open) closes first.
+        document.addEventListener("click", e => {
+            if (panel.contains(e.target) || picker.contains(e.target)) return;
+            if (picker.classList.contains("open")) { closePicker(); return; }
+            panel.classList.toggle("open");
+        });
+        document.addEventListener("keydown", e => {
+            if (e.key !== "Escape") return;
+            if (picker.classList.contains("open")) closePicker();
+            else panel.classList.remove("open");
+        });
+
+        setPalette(loadInitial(), { save: false });
+    </script>
+</body>
+
+</html>
