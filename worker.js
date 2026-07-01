@@ -49,9 +49,10 @@ export default {
         case '/live': return json(await getLive(), 20);
         case '/day': return json(await getDay(url.searchParams.get('date')), 120);
         case '/match': return json(await getMatch(url.searchParams.get('id')), 15);
+        case '/shots': return json(await getShots(url.searchParams.get('id')), 15);
         case '/leagues': return json(await getLeagues(), 3600);
         case '/':
-        case '': return json({ ok: true, leagues: LEAGUES.length, endpoints: ['/live', '/day?date=YYYY-MM-DD', '/match?id=espn:slug:eventId', '/leagues'] }, 60);
+        case '': return json({ ok: true, leagues: LEAGUES.length, endpoints: ['/live', '/day?date=YYYY-MM-DD', '/match?id=espn:slug:eventId', '/shots?id=espn:slug:eventId', '/leagues'] }, 60);
         default: return json({ error: 'not found' }, 0, 404);
       }
     } catch (e) {
@@ -112,6 +113,8 @@ function slim(e, leagueName, slug) {
     homeAbbr: h.team && h.team.abbreviation, awayAbbr: a.team && a.team.abbreviation,
     homeCrest: (h.team && h.team.logo) || '', awayCrest: (a.team && a.team.logo) || '',
     a: numScore(h.score), b: numScore(a.score),
+    soA: numScore(h.shootoutScore), soB: numScore(a.shootoutScore),   // penalty shootout
+    pens: /pen/i.test(((st.type && st.type.detail) || '') + ' ' + ((st.type && st.type.shortDetail) || '')),
     statusType: state === 'in' ? 'inprogress' : (state === 'post' ? 'finished' : 'notstarted'),
     statusDesc: (st.type && st.type.description) || '',
     detail: (st.type && st.type.shortDetail) || '',
@@ -147,4 +150,22 @@ async function getMatch(id) {
   if (p[0] !== 'espn' || !p[1] || !p[2]) throw new Error('bad id');
   const evs = await fetchLeague(p[1]);
   return { event: evs.find(e => e.id === id) || null };
+}
+
+// Penalty-shootout kicks per team, made/missed in order, from the summary feed
+// (the scoreboard only has the totals). Works for live AND finished matches.
+async function getShots(id) {
+  const p = (id || '').split(':');
+  if (p[0] !== 'espn' || !p[1] || !p[2]) throw new Error('bad id');
+  const sum = await espn(`/${p[1]}/summary?event=${p[2]}`, 15);
+  const arr = Array.isArray(sum.shootout) ? sum.shootout : [];
+  const cs = (sum.header && sum.header.competitions && sum.header.competitions[0] && sum.header.competitions[0].competitors) || [];
+  const nameOf = side => { const c = cs.find(x => x.homeAway === side); return (c && c.team && c.team.displayName) || ''; };
+  const seqOf = name => { const t = arr.find(x => (x.team || '').toLowerCase() === name.toLowerCase()); return t ? (t.shots || []).map(s => !!s.didScore) : []; };
+  let home = seqOf(nameOf('home')), away = seqOf(nameOf('away'));
+  if (!home.length && !away.length && arr.length === 2) {       // fallback: assume order
+    home = (arr[0].shots || []).map(s => !!s.didScore);
+    away = (arr[1].shots || []).map(s => !!s.didScore);
+  }
+  return { home, away };
 }

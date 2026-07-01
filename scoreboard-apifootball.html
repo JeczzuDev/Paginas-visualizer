@@ -319,6 +319,62 @@
             letter-spacing: 2px;
         }
 
+        /* penalty-shootout tag — sits in the timer box, clock hidden during pens */
+        /* penalty-kick dots under each team (green = scored, red = missed) */
+        #display[data-theme="wc26"] .pens-dots {
+            position: absolute;
+            bottom: -22px;
+            display: flex;
+            gap: 7px;
+            z-index: 5;
+        }
+
+        #display[data-theme="wc26"] .pens-dots-a {
+            left: 40px;
+        }
+
+        #display[data-theme="wc26"] .pens-dots-b {
+            right: 40px;
+        }
+
+        #display[data-theme="wc26"] .pen-dot {
+            width: 13px;
+            height: 13px;
+            border-radius: 50%;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, .4);
+        }
+
+        #display[data-theme="wc26"] .pen-dot.scored {
+            background: #01C853;
+        }
+
+        #display[data-theme="wc26"] .pen-dot.missed {
+            background: #D60000;
+        }
+
+        #display[data-theme="wc26"] .pens-tag {
+            font-family: 'Montserrat', sans-serif;
+            font-weight: 700;
+            font-size: 20px;
+            letter-spacing: 1px;
+            color: #fff;
+            background: #0d0d0d;
+            padding: 8px 50px;
+            border-radius: 26px;
+            white-space: nowrap;
+            text-align: center;
+        }
+
+        #display[data-theme="wc26"] .pens-tag span {
+            font-family: 'Montserrat', sans-serif;
+            font-weight: 900;
+            font-size: 50px;
+            letter-spacing: 1px;
+            color: #fff;
+            background: #0d0d0d;
+            text-transform: lowercase;
+        }
+
         /* ---- black capsule overlay (teams + score section) ---- */
         #display[data-theme="wc26"] .overlay {
             position: absolute;
@@ -918,7 +974,7 @@
                     <img class="badge" data-badge-b data-adjust="flagB" alt="">
                 </div>
             </div>
-            <div class="clockwrap">
+            <div class="clockwrap" data-clock-section>
                 <span class="clock" data-clock data-adjust="clock">90:00</span>
                 <span class="status" data-status data-adjust="status">LIVE</span>
             </div>
@@ -939,6 +995,7 @@
                 <div class="purple"></div>
                 <div class="white">
                     <span class="timer" data-clock data-adjust="clock">90:00</span>
+                    <span class="pens-tag hidden" data-pens>PENALES 0–0</span>
                 </div>
             </div>
 
@@ -971,6 +1028,8 @@
                     </div>
                 </div>
             </div>
+            <div class="pens-dots pens-dots-a hidden" data-pens-home></div>
+            <div class="pens-dots pens-dots-b hidden" data-pens-away></div>
         </div>
     </template>
 
@@ -1045,6 +1104,7 @@
                 </div>
                 <input type="text" data-status-custom placeholder="e.g. 45+2" hidden style="width:100px">
                 <span class="ctl-sep"></span>
+                <label class="toggle"><input type="checkbox" data-show-clock checked> clock</label>
                 <label class="toggle"><input type="checkbox" data-show-logo checked> logo</label>
                 <span class="lbl">Logo</span>
                 <div class="seg" data-logo-buttons>
@@ -1136,6 +1196,8 @@
                 status: 'LIVE',
                 source: 'manual',
                 showLogo: true,
+                showClock: true,
+                pens: { show: false, a: 0, b: 0, home: [], away: [] },   // shootout tag + kick dots
                 logo: 'WC26_Logo.avif',   // which emblem image the logo slot shows
                 adjust: {},     // per-element { x, y, scale } nudges keyed by data-adjust
                 rev: 0
@@ -1239,6 +1301,9 @@
             setBadge('[data-badge-a]', resolveBadge(state.teamA.badge));
             setBadge('[data-badge-b]', resolveBadge(state.teamB.badge));
 
+            const clockSec = $('[data-clock-section]');
+            if (clockSec) clockSec.classList.toggle('hidden', !state.showClock);
+
             const logo = $('[data-logo]');
             if (logo) {
                 logo.classList.toggle('hidden', !state.showLogo);
@@ -1255,16 +1320,43 @@
                 statusEl.className = 'status ' + statusClass(state.status);
                 statusEl.classList.toggle('hidden', !state.status);
             }
+            renderPens();
+            renderShots();
             renderClock();
         }
 
         function renderClock() {
             const el = $('[data-clock]');
             if (!el) return;
-            // Always show the timer — in the official theme it's the only clock
-            // display, so it must stay visible even at full-time (FT).
+            // Hidden during a shootout — the PENS tag takes the timer's place.
+            if (state.pens && state.pens.show && $('[data-pens]')) { el.classList.add('hidden'); return; }
+            // Otherwise always visible (it's the only clock display on the official theme).
             el.classList.remove('hidden');
             el.textContent = formatClock(elapsedSeconds());
+        }
+
+        function renderPens() {
+            const el = $('[data-pens]');
+            if (!el) return;
+            if (state.pens && state.pens.show) {
+                el.innerHTML = `PENALES <br> <span>${state.pens.a} - ${state.pens.b}</span>`;
+                el.classList.remove('hidden');
+            } else {
+                el.classList.add('hidden');
+            }
+        }
+
+        // Penalty-kick dots under each team (green = scored, red = missed).
+        function renderShots() {
+            const draw = (sel, arr) => {
+                const c = $(sel);
+                if (!c) return;
+                if (!state.pens || !state.pens.show || !arr || !arr.length) { c.innerHTML = ''; c.classList.add('hidden'); return; }
+                c.classList.remove('hidden');
+                c.innerHTML = arr.map(made => `<span class="pen-dot ${made ? 'scored' : 'missed'}"></span>`).join('');
+            };
+            draw('[data-pens-home]', state.pens && state.pens.home);
+            draw('[data-pens-away]', state.pens && state.pens.away);
         }
 
         function statusClass(s) {
@@ -1375,7 +1467,8 @@
             });
             bindInput('[data-status-custom]', v => { state.status = v || 'LIVE'; saveState(); });
 
-            // --- logo toggle ---
+            // --- clock + logo toggles ---
+            on('[data-show-clock]', () => { state.showClock = $('[data-show-clock]').checked; saveState(); }, 'change');
             on('[data-show-logo]', () => { state.showLogo = $('[data-show-logo]').checked; saveState(); }, 'change');
 
             // --- logo image selector ---
@@ -1469,6 +1562,7 @@
             setVal('[data-badge-b-in]', state.teamB.badge);
             setText('[data-score-a-val]', state.scoreA);
             setText('[data-score-b-val]', state.scoreB);
+            const clockChk = $('[data-show-clock]'); if (clockChk) clockChk.checked = !!state.showClock;
             const logoChk = $('[data-show-logo]'); if (logoChk) logoChk.checked = !!state.showLogo;
             markActiveStatus();
             markActiveTheme();
@@ -1687,6 +1781,7 @@
             applySelectedApiMatch();
             closeMatchModal();
             startLivePoll();   // relay matches auto-update every RELAY_POLL_MS until FT
+            if (Number.isFinite(ev.soA) && Number.isFinite(ev.soB)) loadShots();   // shootout dots (live or finished)
         }
 
         /* ---- color picker popup (native <input type=color> is invisible in OBS) ---- */
@@ -1775,6 +1870,7 @@
                 strHomeTeamBadge: ev.homeCrest || '',
                 strAwayTeamBadge: ev.awayCrest || '',
                 intHomeScore: ev.a, intAwayScore: ev.b,
+                soA: ev.soA, soB: ev.soB,
                 strLeague: ev.league, country: ev.country || '',
                 dateEvent: ev.startTs ? new Date(ev.startTs * 1000).toISOString().slice(0, 10) : '',
                 minute: ev.minute,
@@ -1801,8 +1897,18 @@
                 state.scoreB = toScore(ev.intAwayScore);
                 applyClockFromMinute(ev);
                 saveState(); syncControlsFromState();
+                if (state.pens && state.pens.show) loadShots();
                 if (ev.statusShort === 'FT') { apiStatus('Match finished — live updates stopped.', 'ok'); stopLivePoll(); }
             } catch (e) { /* transient — try again next tick */ }
+        }
+
+        // Fetch the shootout kick sequence (made/missed per team) from the relay.
+        async function loadShots() {
+            if (!relayReady() || !selectedEvent || selectedEvent._provider !== 'relay') return;
+            try {
+                const d = await relayGet('/shots?id=' + encodeURIComponent(selectedEvent.relayId));
+                if (state.pens) { state.pens.home = d.home || []; state.pens.away = d.away || []; saveState(); }
+            } catch (e) { /* transient */ }
         }
 
         async function loadLive() {
@@ -1902,6 +2008,7 @@
 
         // API-Football exposes the live elapsed minute — seed the clock from it.
         function applyClockFromMinute(ev) {
+            applyPens(ev);
             const s = (ev.statusShort || '').toUpperCase();
             const inPlay = ['1H', '2H', 'ET', 'LIVE', 'P'].includes(s);
             if (Number.isFinite(ev.minute)) {
@@ -1911,6 +2018,17 @@
             }
             if (s === 'NS') return;   // upcoming match — don't force a live status
             state.status = mapStatus(ev);
+        }
+
+        // Penalty shootout: ESPN keeps the regular score and exposes the live
+        // shootout count in soA/soB while status is "Shootout" / "AET-pens".
+        function applyPens(ev) {
+            if (Number.isFinite(ev.soA) && Number.isFinite(ev.soB)) {
+                const prev = (state.pens && state.pens.show) ? state.pens : {};
+                state.pens = { show: true, a: ev.soA, b: ev.soB, home: prev.home || [], away: prev.away || [] };
+            } else {
+                state.pens = { show: false, a: 0, b: 0, home: [], away: [] };
+            }
         }
 
         function toScore(v) {
