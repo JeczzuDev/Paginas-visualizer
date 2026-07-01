@@ -311,6 +311,12 @@
             justify-content: center;
         }
 
+        #display[data-theme="wc26"] .flex-bg .white.hidden {
+            display: none;
+            flex: 0;
+        }
+
+
         #display[data-theme="wc26"] .timer {
             font-family: 'Montserrat', sans-serif;
             font-weight: 900;
@@ -320,28 +326,44 @@
         }
 
         /* penalty-shootout tag — sits in the timer box, clock hidden during pens */
-        /* penalty-kick dots under each team (green = scored, red = missed) */
+        /* penalty-kick dots — a dark pill centered under each team
+           (lives inside .team-1 / .team-2 so it tracks the team) */
         #display[data-theme="wc26"] .pens-dots {
             position: absolute;
-            bottom: -22px;
+            top: 130%;
+            left: 50%;
+            transform: translateX(-50%);
             display: flex;
-            gap: 7px;
+            flex-direction: column;
+            align-items: start;
+            gap: 20px;
+            padding: 15px 20px;
+            background: #0d0d0d;
+            border-radius: 15px;
+            box-shadow: 0 5px 14px rgba(0, 0, 0, .45);
             z-index: 5;
         }
 
-        #display[data-theme="wc26"] .pens-dots-a {
-            left: 40px;
-        }
-
-        #display[data-theme="wc26"] .pens-dots-b {
-            right: 40px;
+        #display[data-theme="wc26"] .pen-row {
+            display: flex;
+            align-items: center;
+            gap: 26px;
         }
 
         #display[data-theme="wc26"] .pen-dot {
-            width: 13px;
-            height: 13px;
-            border-radius: 50%;
-            box-shadow: 0 1px 2px rgba(0, 0, 0, .4);
+            width: 30px;
+            height: 30px;
+            border-radius: 15%;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, .5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #display[data-theme="wc26"] .pen-dot svg {
+            width: 62%;
+            height: 62%;
+            display: block;
         }
 
         #display[data-theme="wc26"] .pen-dot.scored {
@@ -353,6 +375,10 @@
         }
 
         #display[data-theme="wc26"] .pens-tag {
+            position: absolute;
+            top: calc(100% + 20px);
+            left: 50%;
+            transform: translateX(-50%);
             font-family: 'Montserrat', sans-serif;
             font-weight: 700;
             font-size: 20px;
@@ -378,8 +404,8 @@
         /* ---- black capsule overlay (teams + score section) ---- */
         #display[data-theme="wc26"] .overlay {
             position: absolute;
-            left: 20px;
-            top: 4px;
+            left: 15px;
+            top: 5px;
             bottom: 14px;
             right: 300px;
             background: #000;
@@ -525,6 +551,7 @@
            divider) · dark-blue timer cap.
            ============================================================ */
         #display[data-theme="chile-1"] .board {
+            position: relative;
             align-items: center;
             background: none;
             overflow: visible;
@@ -535,7 +562,7 @@
         #display[data-theme="chile-1"] .clockwrap {
             height: 96px;
             background: linear-gradient(160deg, #000b2f, #070d28);
-            box-shadow: 0 10px 24px rgba(0, 0, 0, .40);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, .16);
         }
 
         #display[data-theme="chile-1"] .emblem {
@@ -559,8 +586,7 @@
             align-items: stretch;
             height: 120px;
             background: #f4f5f7;
-            overflow: hidden;
-            box-shadow: 0 10px 24px rgba(0, 0, 0, .40);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, .16);
         }
 
         #display[data-theme="chile-1"] .side {
@@ -570,6 +596,13 @@
             gap: 14px;
             background: none;
             align-items: center;
+        }
+
+        #display[data-theme="chile-1"] .side .team-content {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            height: 100%;
         }
 
         /* each side carries its team colour as a top border */
@@ -628,6 +661,98 @@
         #display[data-theme="chile-1"] .score {
             font-size: 56px;
             font-weight: 700;
+        }
+
+        /* pens dots positioned absolutely below each team */
+        #display[data-theme="chile-1"] .side .pens-dots {
+            position: absolute;
+            top: 125%;
+            width: auto;
+            display: flex;
+            flex-direction: column;
+            align-items: start;
+            gap: 10px;
+            padding: 12px 12px;
+            background: #ffffff;
+            border: 1px solid #dfe3ea;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, .16);
+            z-index: 10;
+        }
+
+        /* position side A dots on the left (25% of teams) */
+        #display[data-theme="chile-1"] .side.a .pens-dots {
+            left: 40%;
+            transform: translateX(-50%);
+        }
+
+        /* position side B dots on the right (75% of teams) */
+        #display[data-theme="chile-1"] .side.b .pens-dots {
+            left: 60%;
+            transform: translateX(-50%);
+        }
+
+        #display[data-theme="chile-1"] .side .pens-dots.hidden {
+            display: none;
+        }
+
+        #display[data-theme="chile-1"] .pen-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            justify-content: center;
+        }
+
+        #display[data-theme="chile-1"] .pen-dot {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #display[data-theme="chile-1"] .pen-dot.scored {
+            background: #01C853;
+        }
+
+        #display[data-theme="chile-1"] .pen-dot.missed {
+            background: #D60000;
+        }
+
+        #display[data-theme="chile-1"] .pen-dot svg {
+            width: 62%;
+            height: 62%;
+            display: block;
+        }
+
+        /* PENALES tag centered between the two pens-dots (same as WC26) */
+        #display[data-theme="chile-1"] .pens-tag {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            top: 125%;
+            font-family: 'Sofia Sans Condensed', 'Saira Condensed', sans-serif;
+            font-weight: 700;
+            font-size: 20px;
+            line-height: 1;
+            text-align: center;
+            color: #0f0f12;
+            padding: 6px 12px;
+            background: #ffffff;
+            border: 1px solid #dfe3ea;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, .16);
+            white-space: nowrap;
+            z-index: 12;
+        }
+
+        #display[data-theme="chile-1"] .pens-tag.hidden {
+            display: none;
+        }
+
+        #display[data-theme="chile-1"] .pens-tag span {
+            display: inline;
+            font-weight: 800;
+            font-size: 30px;
         }
 
         /* ============================================================
@@ -964,14 +1089,21 @@
             </div>
             <div class="teams">
                 <div class="side a">
-                    <img class="badge" data-badge-a data-adjust="flagA" alt="">
-                    <span class="abbr" data-abbr-a data-adjust="abbrA">FRA</span>
-                    <span class="score" data-score-a data-adjust="scoreA">0</span>
+                    <div class="team-content">
+                        <img class="badge" data-badge-a data-adjust="flagA" alt="">
+                        <span class="abbr" data-abbr-a data-adjust="abbrA">FRA</span>
+                        <span class="score" data-score-a data-adjust="scoreA">0</span>
+                    </div>
+                    <div class="pens-dots hidden" data-pens-home></div>
                 </div>
+                <span class="pens-tag hidden" data-pens>PENALES 0–0</span>
                 <div class="side b">
-                    <span class="score" data-score-b data-adjust="scoreB">0</span>
-                    <span class="abbr" data-abbr-b data-adjust="abbrB">SEN</span>
-                    <img class="badge" data-badge-b data-adjust="flagB" alt="">
+                    <div class="team-content">
+                        <span class="score" data-score-b data-adjust="scoreB">0</span>
+                        <span class="abbr" data-abbr-b data-adjust="abbrB">SEN</span>
+                        <img class="badge" data-badge-b data-adjust="flagB" alt="">
+                    </div>
+                    <div class="pens-dots hidden" data-pens-away></div>
                 </div>
             </div>
             <div class="clockwrap" data-clock-section>
@@ -993,9 +1125,8 @@
                 <div class="purple"></div>
                 <div class="green"></div>
                 <div class="purple"></div>
-                <div class="white">
+                <div class="white" data-clock-section>
                     <span class="timer" data-clock data-adjust="clock">90:00</span>
-                    <span class="pens-tag hidden" data-pens>PENALES 0–0</span>
                 </div>
             </div>
 
@@ -1007,6 +1138,7 @@
                     </div>
                     <div class="dot light-blue-dot"></div>
                     <div class="team-code" data-abbr-a data-adjust="abbrA">FRA</div>
+                    <div class="pens-dots hidden" data-pens-home></div>
                 </div>
 
                 <div class="score-section">
@@ -1018,6 +1150,7 @@
                         </div>
                     </div>
                     <div class="score-box right-score" data-score-b data-adjust="scoreB">0</div>
+                    <span class="pens-tag hidden" data-pens>PENALES 0–0</span>
                 </div>
 
                 <div class="team-2">
@@ -1026,10 +1159,9 @@
                     <div class="flag-container" data-adjust="flagB">
                         <div class="flag"><img class="flag-img" data-badge-b alt=""></div>
                     </div>
+                    <div class="pens-dots hidden" data-pens-away></div>
                 </div>
             </div>
-            <div class="pens-dots pens-dots-a hidden" data-pens-home></div>
-            <div class="pens-dots pens-dots-b hidden" data-pens-away></div>
         </div>
     </template>
 
@@ -1328,9 +1460,7 @@
         function renderClock() {
             const el = $('[data-clock]');
             if (!el) return;
-            // Hidden during a shootout — the PENS tag takes the timer's place.
-            if (state.pens && state.pens.show && $('[data-pens]')) { el.classList.add('hidden'); return; }
-            // Otherwise always visible (it's the only clock display on the official theme).
+            // Always visible; during a shootout it's frozen at the end-of-ET value (120:00).
             el.classList.remove('hidden');
             el.textContent = formatClock(elapsedSeconds());
         }
@@ -1346,17 +1476,25 @@
             }
         }
 
-        // Penalty-kick dots under each team (green = scored, red = missed).
+        // Penalty-kick marks: white ○ inside scored (green) dots, white ✕ inside missed (red).
+        const PEN_ICON_SCORED = '<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="6.5" stroke="#fff" stroke-width="3"/></svg>';
+        const PEN_ICON_MISSED = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg>';
         function renderShots() {
             const draw = (sel, arr) => {
                 const c = $(sel);
                 if (!c) return;
                 if (!state.pens || !state.pens.show || !arr || !arr.length) { c.innerHTML = ''; c.classList.add('hidden'); return; }
                 c.classList.remove('hidden');
-                c.innerHTML = arr.map(made => `<span class="pen-dot ${made ? 'scored' : 'missed'}"></span>`).join('');
+                let html = '';   // 5 kicks per row; sudden-death kicks wrap to a new row
+                for (let i = 0; i < arr.length; i += 5) {
+                    html += '<div class="pen-row">' + arr.slice(i, i + 5)
+                        .map(made => `<span class="pen-dot ${made ? 'scored' : 'missed'}">${made ? PEN_ICON_SCORED : PEN_ICON_MISSED}</span>`).join('') + '</div>';
+                }
+                c.innerHTML = html;
             };
             draw('[data-pens-home]', state.pens && state.pens.home);
             draw('[data-pens-away]', state.pens && state.pens.away);
+            renderPens();   // also update the PENALES tag
         }
 
         function statusClass(s) {
@@ -2010,7 +2148,8 @@
         function applyClockFromMinute(ev) {
             applyPens(ev);
             const s = (ev.statusShort || '').toUpperCase();
-            const inPlay = ['1H', '2H', 'ET', 'LIVE', 'P'].includes(s);
+            // Freeze the clock during a shootout (show the end-of-ET value, e.g. 120:00).
+            const inPlay = ['1H', '2H', 'ET', 'LIVE', 'P'].includes(s) && !(state.pens && state.pens.show);
             if (Number.isFinite(ev.minute)) {
                 state.clock.base = ev.minute * 60;
                 state.clock.since = Date.now();
