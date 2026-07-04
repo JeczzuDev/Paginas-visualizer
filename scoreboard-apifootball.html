@@ -1246,6 +1246,18 @@
                     <button class="ghost" data-logo-pick="CHILE_3_Logo.png">Chile 3</button>
                 </div>
             </div>
+
+            <!-- Row 4 — Penalties -->
+            <div class="ctl-row">
+                <span class="lbl">Penalties</span>
+                <label class="toggle"><input type="checkbox" data-show-pens> Show shootout</label>
+                <button class="green" data-pens-refresh title="Fetch latest penalty kicks from ESPN">🔄 Refresh kicks</button>
+                <span class="lbl">Score:</span>
+                <input type="number" data-pens-a min="0" value="0" style="width:50px">
+                <span class="lbl">-</span>
+                <input type="number" data-pens-b min="0" value="0" style="width:50px">
+                <button class="ghost" data-pens-set>Set</button>
+            </div>
         </div>
     </div>
 
@@ -1609,6 +1621,16 @@
             on('[data-show-clock]', () => { state.showClock = $('[data-show-clock]').checked; saveState(); }, 'change');
             on('[data-show-logo]', () => { state.showLogo = $('[data-show-logo]').checked; saveState(); }, 'change');
 
+            // --- penalties ---
+            on('[data-show-pens]', () => { state.pens.show = $('[data-show-pens]').checked; saveState(); }, 'change');
+            on('[data-pens-refresh]', refreshPenalties);
+            on('[data-pens-set]', () => {
+                const a = parseInt($('[data-pens-a]').value, 10) || 0;
+                const b = parseInt($('[data-pens-b]').value, 10) || 0;
+                if (state.pens) { state.pens.a = a; state.pens.b = b; } else { state.pens = { show: true, a, b, home: [], away: [] }; }
+                saveState();
+            });
+
             // --- logo image selector ---
             document.querySelectorAll('[data-logo-pick]').forEach(btn => {
                 btn.addEventListener('click', () => {
@@ -1702,6 +1724,11 @@
             setText('[data-score-b-val]', state.scoreB);
             const clockChk = $('[data-show-clock]'); if (clockChk) clockChk.checked = !!state.showClock;
             const logoChk = $('[data-show-logo]'); if (logoChk) logoChk.checked = !!state.showLogo;
+            const pensChk = $('[data-show-pens]'); if (pensChk) pensChk.checked = !!(state.pens && state.pens.show);
+            if (state.pens) {
+                setVal('[data-pens-a]', state.pens.a);
+                setVal('[data-pens-b]', state.pens.b);
+            }
             markActiveStatus();
             markActiveTheme();
             markActiveLogo();
@@ -2207,6 +2234,24 @@
                 apiStatus(ok ? 'Score refreshed from API.' : 'No data returned for this match.', ok ? 'ok' : 'err');
             } catch (e) {
                 apiStatus('Refresh error: ' + e.message, 'err');
+            }
+        }
+
+        // Manually fetch the latest penalty kicks from the relay.
+        async function refreshPenalties() {
+            if (!relayReady()) { apiStatus('Configure relay URL first.', 'err'); return; }
+            if (!selectedEvent || selectedEvent._provider !== 'relay') { apiStatus('Load a live match first.', 'err'); return; }
+            apiStatus('Fetching penalty kicks…');
+            try {
+                await loadShots();
+                if (state.pens) {
+                    state.pens.show = true;
+                    saveState();
+                    syncControlsFromState();
+                }
+                apiStatus('Penalty kicks updated.', 'ok');
+            } catch (e) {
+                apiStatus('Penalties error: ' + e.message, 'err');
             }
         }
 
