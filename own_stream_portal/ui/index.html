@@ -2,10 +2,23 @@
 <html lang="es">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#0b0d12">
     <title>Own Stream Portal</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <p>Own Stream Portal — UI en construccion (paso 4).</p>
+    <header data-role="status" class="status is-connecting">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span data-role="status-text">Conectando…</span>
+    </header>
+
+    <nav data-role="tabs" class="tabs" hidden></nav>
+
+    <main data-role="grid" class="grid"></main>
+
+    <div data-role="toast" class="toast" hidden></div>
+
+    <script type="module" src="app.js"></script>
 </body>
 </html>

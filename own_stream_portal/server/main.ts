@@ -10,8 +10,11 @@ import { fileURLToPath } from 'node:url';
 import qrcode from 'qrcode-terminal';
 import { ConfigStore, formatConfigError } from './config.js';
 import { createHttpServer } from './http.js';
+import { StateStore } from './state.js';
+import { WsHub } from './ws-hub.js';
 import { log } from './log.js';
 
+const VERSION = '1.0.0';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 try {
@@ -34,6 +37,22 @@ store.watch();
 
 const { port, host } = store.current.server;
 const httpServer = createHttpServer({ uiDir: path.join(ROOT, 'ui'), token });
+
+const stateStore = new StateStore();
+
+const hub = new WsHub({
+    server: httpServer,
+    token,
+    version: VERSION,
+    getPages: () => store.current.pages,
+    getState: () => stateStore.state,
+    onPress: async () => {
+        throw new Error('accion no implementada todavia');
+    }
+});
+
+store.on('layout-changed', () => hub.broadcastLayout(store.current.pages));
+stateStore.on('changed', () => hub.broadcastState(stateStore.state));
 
 httpServer.listen(port, host, () => printBanner());
 
