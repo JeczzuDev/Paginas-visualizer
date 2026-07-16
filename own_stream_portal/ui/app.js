@@ -6,6 +6,7 @@
 'use strict';
 
 import * as deck from './deck.js';
+import { enableWakeLock } from './wakelock.js';
 
 const $status = document.querySelector('[data-role="status"]');
 const $statusText = document.querySelector('[data-role="status-text"]');
@@ -154,4 +155,5 @@ if (!token) {
 } else {
     setStatus('connecting', 'Conectando…');
     connect();
+    enableWakeLock();
 }

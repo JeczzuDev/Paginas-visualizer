@@ -1,0 +1,22 @@
+{
+    "name": "Own Stream Portal",
+    "short_name": "Deck",
+    "description": "Deck de control para OBS y el PC de streaming",
+    "display": "standalone",
+    "orientation": "any",
+    "start_url": "/",
+    "background_color": "#0b0d12",
+    "theme_color": "#0b0d12",
+    "icons": [
+        {
+            "src": "icons/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ]
+}
