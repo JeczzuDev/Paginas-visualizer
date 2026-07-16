@@ -14,6 +14,8 @@ import { StateStore } from './state.js';
 import { WsHub } from './ws-hub.js';
 import { Dispatcher } from './actions/dispatcher.js';
 import { launchApp, openUrl } from './actions/launch.js';
+import { createInjector } from './actions/input.js';
+import { parseHotkey, MEDIA_VK, VOLUME_VK } from './actions/keys.js';
 import { isButton, type Button } from './schema.js';
 import { log } from './log.js';
 
@@ -43,9 +45,15 @@ const httpServer = createHttpServer({ uiDir: path.join(ROOT, 'ui'), token });
 
 const stateStore = new StateStore();
 
+const injector = createInjector();
+
 const dispatcher = new Dispatcher();
 dispatcher.register('launch.app', (action) => launchApp(action.path, action.args, action.cwd));
 dispatcher.register('launch.url', (action) => openUrl(action.url));
+dispatcher.register('keys.hotkey', async (action) => injector.tapKeys(parseHotkey(action.keys)));
+dispatcher.register('keys.text', async (action) => injector.typeText(action.text));
+dispatcher.register('media', async (action) => injector.tapKey(MEDIA_VK[action.key]));
+dispatcher.register('volume', async (action) => injector.tapKey(VOLUME_VK[action.op], action.steps));
 
 function findButton(buttonId: string): Button {
     for (const page of store.current.pages) {
