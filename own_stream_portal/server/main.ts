@@ -16,6 +16,7 @@ import { Dispatcher } from './actions/dispatcher.js';
 import { launchApp, openUrl } from './actions/launch.js';
 import { createInjector } from './actions/input.js';
 import { parseHotkey, MEDIA_VK, VOLUME_VK } from './actions/keys.js';
+import { ObsClient, collectInterests } from './actions/obs.js';
 import { isButton, type Button } from './schema.js';
 import { log } from './log.js';
 
@@ -47,6 +48,13 @@ const stateStore = new StateStore();
 
 const injector = createInjector();
 
+const obsClient = new ObsClient(
+    store.current.obs.url,
+    (process.env.OBS_PASSWORD ?? '').trim() || undefined,
+    stateStore,
+    () => collectInterests(store.current.pages)
+);
+
 const dispatcher = new Dispatcher();
 dispatcher.register('launch.app', (action) => launchApp(action.path, action.args, action.cwd));
 dispatcher.register('launch.url', (action) => openUrl(action.url));
@@ -54,6 +62,15 @@ dispatcher.register('keys.hotkey', async (action) => injector.tapKeys(parseHotke
 dispatcher.register('keys.text', async (action) => injector.typeText(action.text));
 dispatcher.register('media', async (action) => injector.tapKey(MEDIA_VK[action.key]));
 dispatcher.register('volume', async (action) => injector.tapKey(VOLUME_VK[action.op], action.steps));
+dispatcher.register('obs.scene', (action) => obsClient.setScene(action.scene));
+dispatcher.register('obs.sourceVisibility', (action) =>
+    obsClient.setSourceVisibility(action.scene, action.source, action.visible)
+);
+dispatcher.register('obs.filter', (action) => obsClient.setFilter(action.source, action.filter, action.enabled));
+dispatcher.register('obs.mute', (action) => obsClient.setMute(action.input, action.mute));
+dispatcher.register('obs.stream', (action) => obsClient.stream(action.op));
+dispatcher.register('obs.record', (action) => obsClient.record(action.op));
+dispatcher.register('obs.raw', (action) => obsClient.raw(action.request, action.params));
 
 function findButton(buttonId: string): Button {
     for (const page of store.current.pages) {
@@ -76,9 +93,13 @@ const hub = new WsHub({
     }
 });
 
-store.on('layout-changed', () => hub.broadcastLayout(store.current.pages));
+store.on('layout-changed', () => {
+    hub.broadcastLayout(store.current.pages);
+    obsClient.refreshInterests();
+});
 stateStore.on('changed', () => hub.broadcastState(stateStore.state));
 
+obsClient.start();
 httpServer.listen(port, host, () => printBanner());
 
 /* Home LANs are almost always 192.168.x.x; virtual adapters (Hyper-V,
