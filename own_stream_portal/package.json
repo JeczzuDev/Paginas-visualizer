@@ -1,0 +1,26 @@
+{
+    "name": "own-stream-portal",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "description": "Browser-based control deck for OBS and the streaming PC (Touch Portal replacement)",
+    "scripts": {
+        "start": "tsx server/main.ts",
+        "dev": "tsx watch server/main.ts",
+        "typecheck": "tsc --noEmit",
+        "tunnel": "node scripts/tunnel.mjs"
+    },
+    "dependencies": {
+        "koffi": "^2.9.0",
+        "obs-websocket-js": "^5.0.6",
+        "qrcode-terminal": "^0.12.0",
+        "ws": "^8.18.0",
+        "zod": "^3.24.0"
+    },
+    "devDependencies": {
+        "@types/node": "^22.10.0",
+        "@types/ws": "^8.5.13",
+        "tsx": "^4.19.0",
+        "typescript": "^5.7.0"
+    }
+}
