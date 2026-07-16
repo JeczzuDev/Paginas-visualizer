@@ -12,7 +12,7 @@ import { ConfigStore, formatConfigError } from './config.js';
 import { createHttpServer } from './http.js';
 import { StateStore } from './state.js';
 import { WsHub } from './ws-hub.js';
-import { Dispatcher } from './actions/dispatcher.js';
+import { Dispatcher, registerMacroHandler } from './actions/dispatcher.js';
 import { launchApp, openUrl } from './actions/launch.js';
 import { createInjector } from './actions/input.js';
 import { parseHotkey, MEDIA_VK, VOLUME_VK } from './actions/keys.js';
@@ -71,6 +71,7 @@ dispatcher.register('obs.mute', (action) => obsClient.setMute(action.input, acti
 dispatcher.register('obs.stream', (action) => obsClient.stream(action.op));
 dispatcher.register('obs.record', (action) => obsClient.record(action.op));
 dispatcher.register('obs.raw', (action) => obsClient.raw(action.request, action.params));
+registerMacroHandler(dispatcher);
 
 function findButton(buttonId: string): Button {
     for (const page of store.current.pages) {

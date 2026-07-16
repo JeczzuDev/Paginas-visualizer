@@ -4,6 +4,7 @@
  * rejected promise) turns into an ack error shown on the phone.
  */
 
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { Action } from '../schema.js';
 
 type HandlerFor<T extends Action['type']> = (
@@ -32,4 +33,28 @@ export class Dispatcher {
         }
         await handler(action, context);
     }
+}
+
+/*
+ * Macro = sequence of simple actions with optional delays. A per-button
+ * lock rejects re-entry, so a double-tap cannot interleave two runs of
+ * the same macro (schema already forbids nested macros).
+ */
+export function registerMacroHandler(dispatcher: Dispatcher): void {
+    const running = new Set<string>();
+
+    dispatcher.register('macro', async (action, context) => {
+        if (running.has(context.buttonId)) {
+            throw new Error('macro ya en ejecucion');
+        }
+        running.add(context.buttonId);
+        try {
+            for (const step of action.steps) {
+                if (step.action) await dispatcher.dispatch(step.action, context);
+                if (step.delayMs) await sleep(step.delayMs);
+            }
+        } finally {
+            running.delete(context.buttonId);
+        }
+    });
 }
