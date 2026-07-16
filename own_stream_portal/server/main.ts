@@ -12,6 +12,9 @@ import { ConfigStore, formatConfigError } from './config.js';
 import { createHttpServer } from './http.js';
 import { StateStore } from './state.js';
 import { WsHub } from './ws-hub.js';
+import { Dispatcher } from './actions/dispatcher.js';
+import { launchApp, openUrl } from './actions/launch.js';
+import { isButton, type Button } from './schema.js';
 import { log } from './log.js';
 
 const VERSION = '1.0.0';
@@ -40,14 +43,28 @@ const httpServer = createHttpServer({ uiDir: path.join(ROOT, 'ui'), token });
 
 const stateStore = new StateStore();
 
+const dispatcher = new Dispatcher();
+dispatcher.register('launch.app', (action) => launchApp(action.path, action.args, action.cwd));
+dispatcher.register('launch.url', (action) => openUrl(action.url));
+
+function findButton(buttonId: string): Button {
+    for (const page of store.current.pages) {
+        for (const cell of page.buttons) {
+            if (isButton(cell) && cell.id === buttonId) return cell;
+        }
+    }
+    throw new Error(`boton desconocido: "${buttonId}"`);
+}
+
 const hub = new WsHub({
     server: httpServer,
     token,
     version: VERSION,
     getPages: () => store.current.pages,
     getState: () => stateStore.state,
-    onPress: async () => {
-        throw new Error('accion no implementada todavia');
+    onPress: async (buttonId) => {
+        const button = findButton(buttonId);
+        await dispatcher.dispatch(button.action, { buttonId });
     }
 });
 
