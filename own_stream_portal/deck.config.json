@@ -1,0 +1,102 @@
+{
+    "server": {
+        "port": 8420,
+        "host": "0.0.0.0"
+    },
+    "obs": {
+        "url": "ws://127.0.0.1:4455"
+    },
+    "pages": [
+        {
+            "id": "main",
+            "label": "Directo",
+            "grid": { "cols": 4, "rows": 3 },
+            "buttons": [
+                {
+                    "id": "scene-en-vivo",
+                    "label": "En Vivo",
+                    "icon": "🔴",
+                    "color": "#dc2626",
+                    "action": { "type": "obs.scene", "scene": "En Vivo" }
+                },
+                {
+                    "id": "scene-brb",
+                    "label": "Ya Vuelvo",
+                    "icon": "☕",
+                    "color": "#d97706",
+                    "action": { "type": "obs.scene", "scene": "Ya Vuelvo" }
+                },
+                {
+                    "id": "scene-final",
+                    "label": "Final",
+                    "icon": "👋",
+                    "color": "#7c3aed",
+                    "action": { "type": "obs.scene", "scene": "Final" }
+                },
+                {
+                    "id": "mute-mic",
+                    "label": "Mic",
+                    "icon": "🎙️",
+                    "color": "#dc2626",
+                    "action": { "type": "obs.mute", "input": "Mic/Aux", "mute": "toggle" }
+                },
+                {
+                    "id": "record",
+                    "label": "Grabar",
+                    "icon": "⏺️",
+                    "action": { "type": "obs.record", "op": "toggle" }
+                },
+                {
+                    "id": "stream",
+                    "label": "Stream",
+                    "icon": "📡",
+                    "action": { "type": "obs.stream", "op": "toggle" }
+                },
+                {
+                    "id": "media-playpause",
+                    "label": "Musica",
+                    "icon": "⏯️",
+                    "action": { "type": "media", "key": "playpause" }
+                },
+                {
+                    "id": "vol-down",
+                    "label": "Vol -",
+                    "icon": "🔉",
+                    "action": { "type": "volume", "op": "down", "steps": 2 }
+                },
+                {
+                    "id": "vol-up",
+                    "label": "Vol +",
+                    "icon": "🔊",
+                    "action": { "type": "volume", "op": "up", "steps": 2 }
+                },
+                {
+                    "id": "brb-macro",
+                    "label": "Modo BRB",
+                    "icon": "🚻",
+                    "color": "#0891b2",
+                    "action": {
+                        "type": "macro",
+                        "steps": [
+                            { "action": { "type": "obs.mute", "input": "Mic/Aux", "mute": true } },
+                            { "delayMs": 300 },
+                            { "action": { "type": "obs.scene", "scene": "Ya Vuelvo" } }
+                        ]
+                    }
+                },
+                {
+                    "id": "open-studio",
+                    "label": "YT Studio",
+                    "icon": "🎥",
+                    "action": { "type": "launch.url", "url": "https://studio.youtube.com" }
+                },
+                {
+                    "id": "notepad",
+                    "label": "Notas",
+                    "icon": "📝",
+                    "action": { "type": "launch.app", "path": "notepad.exe" }
+                }
+            ]
+        }
+    ]
+}
