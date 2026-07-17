@@ -99,6 +99,41 @@
             ]
         },
         {
+            "id": "fuentes",
+            "label": "Fuentes",
+            "grid": { "cols": 4, "rows": 2 },
+            "buttons": [
+                {
+                    "id": "src-empezando",
+                    "label": "EMPEZANDO",
+                    "icon": "⏳",
+                    "color": "#16a34a",
+                    "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "EMPEZANDO_TEXT", "visible": "toggle" }
+                },
+                {
+                    "id": "src-ya-vuelvo",
+                    "label": "YA VUELVO",
+                    "icon": "☕",
+                    "color": "#d97706",
+                    "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "YA_VUELVO_TEXT", "visible": "toggle" }
+                },
+                {
+                    "id": "src-captura-ventana",
+                    "label": "VENTANA",
+                    "icon": "🪟",
+                    "color": "#6366f1",
+                    "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "Captura de ventana 2", "visible": "toggle" }
+                },
+                {
+                    "id": "src-captura-pantalla",
+                    "label": "PANTALLA",
+                    "icon": "🖥️",
+                    "color": "#0d9488",
+                    "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "Captura de pantalla 2", "visible": "toggle" }
+                }
+            ]
+        },
+        {
             "id": "control",
             "label": "Control",
             "grid": { "cols": 4, "rows": 2 },
