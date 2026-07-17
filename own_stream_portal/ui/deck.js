@@ -149,29 +149,34 @@ function initSwipe() {
 
 function onSwipeStart(e) {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
-    swipe = { x0: e.clientX, y0: e.clientY, id: e.pointerId };
+    swipe = { x0: e.clientX, y0: e.clientY, id: e.pointerId, fired: false };
     /* listen on window so a drag that leaves the grid still completes */
+    window.addEventListener('pointermove', onSwipeMove);
     window.addEventListener('pointerup', onSwipeEnd);
     window.addEventListener('pointercancel', onSwipeEnd);
 }
 
-function onSwipeEnd(e) {
-    window.removeEventListener('pointerup', onSwipeEnd);
-    window.removeEventListener('pointercancel', onSwipeEnd);
-    if (!swipe || e.pointerId !== swipe.id) {
-        swipe = null;
-        return;
-    }
+/* Decide during the drag, not at release: this fires the moment the
+ * finger crosses the threshold, so it still works even if the browser
+ * later cancels the pointer (which is what silently killed swipes that
+ * only checked at pointerup). */
+function onSwipeMove(e) {
+    if (!swipe || e.pointerId !== swipe.id || swipe.fired) return;
     const dx = e.clientX - swipe.x0;
     const dy = e.clientY - swipe.y0;
-    swipe = null;
-    if (e.type === 'pointercancel') return;
-    /* horizontal-dominant drag past the threshold = page change */
     if (Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy) * 1.3) {
-        suppressClickUntil = Date.now() + 500;
+        swipe.fired = true;
+        suppressClickUntil = Date.now() + 600; // the release will fire a click; ignore it
         for (const { el } of buttonIndex.values()) el.classList.remove('pressed');
         stepPage(dx < 0 ? 1 : -1);
     }
+}
+
+function onSwipeEnd() {
+    window.removeEventListener('pointermove', onSwipeMove);
+    window.removeEventListener('pointerup', onSwipeEnd);
+    window.removeEventListener('pointercancel', onSwipeEnd);
+    swipe = null;
 }
 
 function renderGrid() {

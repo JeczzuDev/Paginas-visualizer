@@ -111,6 +111,11 @@ body {
     gap: 10px;
     padding: 10px;
     min-height: 0;
+    /* claim horizontal drags for our swipe handler instead of letting the
+     * browser scroll/zoom (which fires pointercancel and kills the swipe);
+     * contain stops the edge back-navigation gesture bleeding in */
+    touch-action: none;
+    overscroll-behavior: contain;
 }
 
 .grid.slide-from-right {
