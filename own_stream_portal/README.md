@@ -60,6 +60,12 @@ estan activos — aunque el cambio se haga desde OBS.
 4. **En el movil** (misma red Wi-Fi): escanea el QR de la consola. Para
    tenerlo como app: menu de Chrome → *Añadir a pantalla de inicio*.
 
+### Navegacion entre paginas
+
+Toca las pestañas de arriba, **desliza el dedo a izquierda/derecha** sobre
+la cuadricula, o usa las flechas ← → del teclado (en PC). Deslizar no
+activa el boton que hay debajo del dedo.
+
 ### Firewall de Windows
 
 La primera vez Windows preguntara si permites conexiones — marca *Redes

@@ -20,8 +20,16 @@ const buttonIndex = new Map();
 let lastState = null;
 let toastTimer = null;
 
+/* swipe navigation */
+const SWIPE_THRESHOLD = 55; // min horizontal px to change page
+let swipe = null;
+/* a swipe ends with a click event on the button under the finger; ignore
+ * clicks for a moment after a swipe so navigation never fires a button */
+let suppressClickUntil = 0;
+
 export function init(onPress) {
     onPressCallback = onPress;
+    initSwipe();
 }
 
 export function renderLayout(newPages) {
@@ -101,13 +109,68 @@ function renderTabs() {
         tab.className = 'tab';
         tab.textContent = page.label;
         tab.classList.toggle('is-current', page.id === activePageId);
-        tab.addEventListener('click', () => {
-            activePageId = page.id;
-            renderTabs();
-            renderGrid();
-            if (lastState) renderState(lastState);
-        });
+        tab.addEventListener('click', () => goToPage(page.id));
         $tabs.appendChild(tab);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Page navigation (tabs, swipe, arrow keys)                          */
+/* ------------------------------------------------------------------ */
+
+function goToPage(pageId, dir = 0) {
+    if (pageId === activePageId) return;
+    activePageId = pageId;
+    renderTabs();
+    renderGrid();
+    if (lastState) renderState(lastState);
+    if (dir !== 0) {
+        $grid.classList.remove('slide-from-left', 'slide-from-right');
+        void $grid.offsetWidth; // restart the animation
+        $grid.classList.add(dir < 0 ? 'slide-from-right' : 'slide-from-left');
+    }
+}
+
+/* delta: +1 next page, -1 previous. Does not wrap around the ends. */
+function stepPage(delta) {
+    const i = pages.findIndex((p) => p.id === activePageId);
+    const next = i + delta;
+    if (i < 0 || next < 0 || next >= pages.length) return;
+    goToPage(pages[next].id, delta);
+}
+
+function initSwipe() {
+    $grid.addEventListener('pointerdown', onSwipeStart);
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowRight') stepPage(1);
+        else if (e.key === 'ArrowLeft') stepPage(-1);
+    });
+}
+
+function onSwipeStart(e) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    swipe = { x0: e.clientX, y0: e.clientY, id: e.pointerId };
+    /* listen on window so a drag that leaves the grid still completes */
+    window.addEventListener('pointerup', onSwipeEnd);
+    window.addEventListener('pointercancel', onSwipeEnd);
+}
+
+function onSwipeEnd(e) {
+    window.removeEventListener('pointerup', onSwipeEnd);
+    window.removeEventListener('pointercancel', onSwipeEnd);
+    if (!swipe || e.pointerId !== swipe.id) {
+        swipe = null;
+        return;
+    }
+    const dx = e.clientX - swipe.x0;
+    const dy = e.clientY - swipe.y0;
+    swipe = null;
+    if (e.type === 'pointercancel') return;
+    /* horizontal-dominant drag past the threshold = page change */
+    if (Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy) * 1.3) {
+        suppressClickUntil = Date.now() + 500;
+        for (const { el } of buttonIndex.values()) el.classList.remove('pressed');
+        stepPage(dx < 0 ? 1 : -1);
     }
 }
 
@@ -160,6 +223,7 @@ function createButton(btn) {
     el.addEventListener('pointerleave', release);
 
     el.addEventListener('click', () => {
+        if (Date.now() < suppressClickUntil) return; // just swiped, not a tap
         if (el.classList.contains('is-disabled')) {
             showToast('OBS desconectado');
             return;

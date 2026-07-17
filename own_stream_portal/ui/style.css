@@ -34,6 +34,7 @@ body {
     user-select: none;
     -webkit-user-select: none;
     -webkit-tap-highlight-color: transparent;
+    overflow-x: hidden; /* clip the page-slide animation, never scroll sideways */
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
@@ -110,6 +111,28 @@ body {
     gap: 10px;
     padding: 10px;
     min-height: 0;
+}
+
+.grid.slide-from-right {
+    animation: slide-from-right 0.18s ease;
+}
+
+.grid.slide-from-left {
+    animation: slide-from-left 0.18s ease;
+}
+
+@keyframes slide-from-right {
+    from {
+        transform: translateX(9%);
+        opacity: 0.3;
+    }
+}
+
+@keyframes slide-from-left {
+    from {
+        transform: translateX(-9%);
+        opacity: 0.3;
+    }
 }
 
 .spacer {
