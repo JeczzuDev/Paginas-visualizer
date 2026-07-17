@@ -8,31 +8,101 @@
     },
     "pages": [
         {
-            "id": "main",
-            "label": "Directo",
-            "grid": { "cols": 4, "rows": 3 },
+            "id": "escenas",
+            "label": "Escenas",
+            "grid": { "cols": 4, "rows": 2 },
             "buttons": [
                 {
-                    "id": "scene-en-vivo",
-                    "label": "En Vivo",
-                    "icon": "🔴",
-                    "color": "#dc2626",
-                    "action": { "type": "obs.scene", "scene": "En Vivo" }
+                    "id": "jc-lobby",
+                    "label": "JC LOBBY",
+                    "icon": "🔵",
+                    "color": "#2563eb",
+                    "action": {
+                        "type": "macro",
+                        "steps": [
+                            { "action": { "type": "obs.scene", "scene": "JC LOBBY" } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "BLUE_BG", "visible": true } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "PINK_BG", "visible": false } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "CUSTOM_BG", "visible": false } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "BLUE_RED_BG", "visible": false } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "ORANGE_BG", "visible": false } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "WC26_BG", "visible": false } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "JC", "visible": true } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "Portada AGP 2", "visible": false } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "WC26", "visible": false } }
+                        ]
+                    }
                 },
                 {
-                    "id": "scene-brb",
-                    "label": "Ya Vuelvo",
-                    "icon": "☕",
-                    "color": "#d97706",
-                    "action": { "type": "obs.scene", "scene": "Ya Vuelvo" }
+                    "id": "agp-lobby",
+                    "label": "AGP LOBBY",
+                    "icon": "💗",
+                    "color": "#db2777",
+                    "action": {
+                        "type": "macro",
+                        "steps": [
+                            { "action": { "type": "obs.scene", "scene": "JC LOBBY" } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "PINK_BG", "visible": true } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "BLUE_BG", "visible": false } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "CUSTOM_BG", "visible": false } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "BLUE_RED_BG", "visible": false } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "ORANGE_BG", "visible": false } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "WC26_BG", "visible": false } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "Portada AGP 2", "visible": true } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "JC", "visible": false } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "WC26", "visible": false } }
+                        ]
+                    }
                 },
                 {
-                    "id": "scene-final",
-                    "label": "Final",
-                    "icon": "👋",
-                    "color": "#7c3aed",
-                    "action": { "type": "obs.scene", "scene": "Final" }
+                    "id": "wc2026",
+                    "label": "WC2026",
+                    "icon": "🏆",
+                    "color": "#ca8a04",
+                    "action": {
+                        "type": "macro",
+                        "steps": [
+                            { "action": { "type": "obs.scene", "scene": "JC LOBBY" } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "CUSTOM_BG", "visible": true } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "BLUE_BG", "visible": false } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "PINK_BG", "visible": false } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "BLUE_RED_BG", "visible": false } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "ORANGE_BG", "visible": false } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "WC26_BG", "visible": false } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "WC26", "visible": true } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "JC", "visible": false } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "Portada AGP 2", "visible": false } }
+                        ]
+                    }
                 },
+                {
+                    "id": "jc-terminando",
+                    "label": "TERMINANDO",
+                    "icon": "🏁",
+                    "color": "#ea580c",
+                    "action": { "type": "obs.scene", "scene": "JC TERMINANDO" }
+                },
+                {
+                    "id": "captura-der",
+                    "label": "CAPTURA DER",
+                    "icon": "🖥️",
+                    "color": "#0d9488",
+                    "action": { "type": "obs.scene", "scene": "CAPTURA PANTALLA [DER]" }
+                },
+                {
+                    "id": "captura-izq",
+                    "label": "CAPTURA IZQ",
+                    "icon": "🖥️",
+                    "color": "#0891b2",
+                    "action": { "type": "obs.scene", "scene": "CAPTURA PANTALLA [IZQ]" }
+                }
+            ]
+        },
+        {
+            "id": "control",
+            "label": "Control",
+            "grid": { "cols": 4, "rows": 2 },
+            "buttons": [
                 {
                     "id": "mute-mic",
                     "label": "Mic",
@@ -69,20 +139,6 @@
                     "label": "Vol +",
                     "icon": "🔊",
                     "action": { "type": "volume", "op": "up", "steps": 2 }
-                },
-                {
-                    "id": "brb-macro",
-                    "label": "Modo BRB",
-                    "icon": "🚻",
-                    "color": "#0891b2",
-                    "action": {
-                        "type": "macro",
-                        "steps": [
-                            { "action": { "type": "obs.mute", "input": "Mic/Aux", "mute": true } },
-                            { "delayMs": 300 },
-                            { "action": { "type": "obs.scene", "scene": "Ya Vuelvo" } }
-                        ]
-                    }
                 },
                 {
                     "id": "open-studio",
