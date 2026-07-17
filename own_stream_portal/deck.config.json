@@ -158,6 +158,55 @@
             ]
         },
         {
+            "id": "avatar",
+            "label": "Avatar",
+            "grid": { "cols": 4, "rows": 2 },
+            "buttons": [
+                {
+                    "id": "avatar-1",
+                    "label": "Estado 1",
+                    "icon": "🙂",
+                    "color": "#8b5cf6",
+                    "action": { "type": "keys.hotkey", "keys": "alt+1" }
+                },
+                {
+                    "id": "avatar-2",
+                    "label": "Estado 2",
+                    "icon": "😀",
+                    "color": "#8b5cf6",
+                    "action": { "type": "keys.hotkey", "keys": "alt+2" }
+                },
+                {
+                    "id": "avatar-3",
+                    "label": "Estado 3",
+                    "icon": "😮",
+                    "color": "#8b5cf6",
+                    "action": { "type": "keys.hotkey", "keys": "alt+3" }
+                },
+                {
+                    "id": "avatar-4",
+                    "label": "Estado 4",
+                    "icon": "😎",
+                    "color": "#8b5cf6",
+                    "action": { "type": "keys.hotkey", "keys": "alt+4" }
+                },
+                {
+                    "id": "avatar-5",
+                    "label": "Estado 5",
+                    "icon": "😠",
+                    "color": "#8b5cf6",
+                    "action": { "type": "keys.hotkey", "keys": "alt+5" }
+                },
+                {
+                    "id": "avatar-6",
+                    "label": "Estado 6",
+                    "icon": "😴",
+                    "color": "#8b5cf6",
+                    "action": { "type": "keys.hotkey", "keys": "alt+6" }
+                }
+            ]
+        },
+        {
             "id": "control",
             "label": "Control",
             "grid": { "cols": 4, "rows": 2 },
