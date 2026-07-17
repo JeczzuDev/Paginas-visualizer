@@ -108,28 +108,52 @@
                     "label": "EMPEZANDO",
                     "icon": "⏳",
                     "color": "#16a34a",
-                    "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "EMPEZANDO_TEXT", "visible": "toggle" }
+                    "action": { 
+                        "type": "macro", 
+                        "steps": [
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "EMPEZANDO_TEXT", "visible": "toggle" } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "YA_VUELVO_TEXT", "visible": false } }
+                        ]
+                    }
                 },
                 {
                     "id": "src-ya-vuelvo",
                     "label": "YA VUELVO",
                     "icon": "☕",
                     "color": "#d97706",
-                    "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "YA_VUELVO_TEXT", "visible": "toggle" }
+                    "action": { 
+                        "type": "macro", 
+                        "steps": [
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "YA_VUELVO_TEXT", "visible": "toggle" } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "EMPEZANDO_TEXT", "visible": false } }
+                        ]
+                    }
                 },
                 {
                     "id": "src-captura-ventana",
                     "label": "VENTANA",
                     "icon": "🪟",
                     "color": "#6366f1",
-                    "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "Captura de ventana 2", "visible": "toggle" }
+                    "action": { 
+                        "type": "macro", 
+                        "steps": [
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "Captura de ventana 2", "visible": "toggle" } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "Captura de pantalla 2", "visible": false } }
+                        ]
+                    }
                 },
                 {
                     "id": "src-captura-pantalla",
                     "label": "PANTALLA",
                     "icon": "🖥️",
                     "color": "#0d9488",
-                    "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "Captura de pantalla 2", "visible": "toggle" }
+                    "action": { 
+                        "type": "macro", 
+                        "steps": [
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "Captura de pantalla 2", "visible": "toggle" } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "Captura de ventana 2", "visible": false } }
+                        ]
+                    }
                 }
             ]
         },
