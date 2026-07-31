@@ -17,11 +17,19 @@ import { launchApp, openUrl } from './actions/launch.js';
 import { createInjector } from './actions/input.js';
 import { parseHotkey, MEDIA_VK, VOLUME_VK } from './actions/keys.js';
 import { ObsClient, collectInterests } from './actions/obs.js';
+import { createApiHandler } from './api.js';
 import { isButton, type Button } from './schema.js';
 import { log } from './log.js';
 
 const VERSION = '1.0.0';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/* Env overrides (handy for a second/staging instance and for testing):
+ *   DECK_CONFIG  path to an alternate deck.config.json
+ *   DECK_PORT    override the port from that config */
+const CONFIG_PATH = (process.env.DECK_CONFIG ?? '').trim()
+    ? path.resolve(process.env.DECK_CONFIG!.trim())
+    : path.join(ROOT, 'deck.config.json');
 
 try {
     process.loadEnvFile(path.join(ROOT, '.env'));
@@ -34,15 +42,15 @@ const tokenIsPersistent = Boolean((process.env.DECK_TOKEN ?? '').trim());
 
 let store: ConfigStore;
 try {
-    store = new ConfigStore(path.join(ROOT, 'deck.config.json'));
+    store = new ConfigStore(CONFIG_PATH);
 } catch (err) {
     log.error('config', `deck.config.json invalido, no puedo arrancar:\n${formatConfigError(err)}`);
     process.exit(1);
 }
 store.watch();
 
-const { port, host } = store.current.server;
-const httpServer = createHttpServer({ uiDir: path.join(ROOT, 'ui'), token });
+const { host } = store.current.server;
+const port = Number(process.env.DECK_PORT) || store.current.server.port;
 
 const stateStore = new StateStore();
 
@@ -54,6 +62,12 @@ const obsClient = new ObsClient(
     stateStore,
     () => collectInterests(store.current.pages)
 );
+
+const httpServer = createHttpServer({
+    uiDir: path.join(ROOT, 'ui'),
+    token,
+    handleApi: createApiHandler({ configPath: store.filePath, obsClient })
+});
 
 const dispatcher = new Dispatcher();
 dispatcher.register('launch.app', (action) => launchApp(action.path, action.args, action.cwd));

@@ -57,6 +57,8 @@ export function isAuthorized(req: http.IncomingMessage, token: string): boolean 
 export interface HttpOptions {
     uiDir: string;
     token: string;
+    /* Optional handler for /api/* routes (the config editor). */
+    handleApi?: (req: http.IncomingMessage, res: http.ServerResponse, url: URL) => Promise<void>;
 }
 
 export function createHttpServer(opts: HttpOptions): http.Server {
@@ -68,6 +70,21 @@ export function createHttpServer(opts: HttpOptions): http.Server {
         if (!isAuthorized(req, opts.token)) {
             res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
             res.end('403 - token invalido o ausente. Abre el enlace con ?token=... (QR en consola).');
+            return;
+        }
+
+        if (url.pathname.startsWith('/api/')) {
+            if (opts.handleApi) {
+                opts.handleApi(req, res, url).catch((err) => {
+                    if (!res.headersSent) {
+                        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+                    }
+                    res.end(JSON.stringify({ ok: false, error: String(err) }));
+                });
+            } else {
+                res.writeHead(404);
+                res.end();
+            }
             return;
         }
 
