@@ -156,6 +156,8 @@ function printBanner(): void {
             : `  Token: ${token} (aleatorio en cada arranque; fijalo en .env -> DECK_TOKEN)`
     );
     console.log('');
+    console.log(`  Editor (en el PC): http://localhost:${port}/editor.html?token=${token}`);
+    console.log('');
 }
 
 function indent(block: string, spaces: number): string {

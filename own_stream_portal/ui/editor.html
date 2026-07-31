@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Editor · Own Stream Portal</title>
+    <link rel="stylesheet" href="editor.css">
+</head>
+<body>
+    <header class="topbar">
+        <div class="brand">Editor <span>· Own Stream Portal</span></div>
+        <div class="obs-status" data-role="obs-status">OBS…</div>
+        <div class="spacer"></div>
+        <button type="button" class="btn" data-role="reload">Recargar</button>
+        <button type="button" class="btn btn-primary" data-role="save" disabled>Guardado</button>
+    </header>
+
+    <main class="layout">
+        <aside class="col col-pages" data-role="pages"></aside>
+        <section class="col col-buttons" data-role="buttons"></section>
+        <section class="col col-editor" data-role="editor"></section>
+    </main>
+
+    <div class="toast" data-role="toast" hidden></div>
+
+    <script type="module" src="editor.js"></script>
+</body>
+</html>
