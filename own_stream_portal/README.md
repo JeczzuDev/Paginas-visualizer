@@ -75,12 +75,36 @@ privadas* y acepta. Si cerraste el aviso sin querer y el movil no conecta:
 netsh advfirewall firewall add rule name="Own Stream Portal" dir=in action=allow protocol=TCP localport=8420
 ```
 
-## Editar los botones
+## Editor visual (recomendado)
 
-Todo esta en `deck.config.json`. Guarda el archivo y el movil se
-actualiza solo (~1 segundo). Si guardas un JSON invalido, el servidor
-avisa en consola con la ruta exacta del error y sigue funcionando con el
-layout anterior.
+En vez de tocar el JSON a mano, abre el **editor** en el navegador del PC:
+
+```
+http://localhost:8420/editor.html?token=TU_TOKEN
+```
+
+(la consola imprime esta URL al arrancar). Te deja:
+
+- Elegir la accion de cada boton desde menus, con **desplegables de tus
+  escenas, fuentes y entradas de audio reales de OBS** — se acabo el
+  escribir nombres a mano y equivocarse.
+- Anadir/eliminar/reordenar botones y paginas, cambiar la cuadricula.
+- Editor de macros paso a paso, con un ayudante para generar "presets de
+  fondo" (mostrar uno y ocultar los demas) de un tiron.
+
+Al pulsar **Guardar**, el servidor valida y escribe `deck.config.json`, y
+todos los dispositivos se actualizan solos. Si algo no cuadra, muestra el
+error exacto y no guarda.
+
+> El editor necesita el servidor con el codigo nuevo: si lo actualizaste,
+> reinicialo (Ctrl+C y `npm start`, o `start-deck.cmd`).
+
+## Editar los botones a mano
+
+Tambien puedes editar `deck.config.json` directamente. Guarda el archivo
+y el movil se actualiza solo (~1 segundo). Si guardas un JSON invalido, el
+servidor avisa en consola con la ruta exacta del error y sigue funcionando
+con el layout anterior.
 
 Ejemplo de boton:
 
