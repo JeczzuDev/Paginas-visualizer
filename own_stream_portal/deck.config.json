@@ -125,6 +125,7 @@
                         "type": "macro", 
                         "steps": [
                             { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "YA_VUELVO_TEXT", "visible": "toggle" } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "CAPTURA PANTALLA [DER]", "source": "YA_VUELVO_TEXT", "visible": "toggle" } },
                             { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "EMPEZANDO_TEXT", "visible": false } }
                         ]
                     }
@@ -137,8 +138,7 @@
                     "action": { 
                         "type": "macro", 
                         "steps": [
-                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "Captura de ventana 2", "visible": "toggle" } },
-                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "Captura de pantalla 2", "visible": false } }
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "Captura de ventana 2", "visible": "toggle" } }
                         ]
                     }
                 },
@@ -151,7 +151,8 @@
                         "type": "macro", 
                         "steps": [
                             { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "Captura de pantalla 2", "visible": "toggle" } },
-                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY", "source": "Captura de ventana 2", "visible": false } }
+                            { "action": { "type": "obs.sourceVisibility", "scene": "CAPTURA PANTALLA [DER]", "source": "Captura de pantalla recortada", "visible": "toggle" } },
+                            { "action": { "type": "obs.sourceVisibility", "scene": "JC LOBBY 2", "source": "Captura de pantalla 2", "visible": "toggle" } }
                         ]
                     }
                 }
@@ -209,8 +210,15 @@
         {
             "id": "control",
             "label": "Control",
-            "grid": { "cols": 4, "rows": 2 },
+            "grid": { "cols": 4, "rows": 3 },
             "buttons": [
+                {
+                    "id": "mute-desktop",
+                    "label": "Escritorio",
+                    "icon": "🎧",
+                    "color": "#7c3aed",
+                    "action": { "type": "obs.mute", "input": "Audio del escritorio", "mute": "toggle" }
+                },
                 {
                     "id": "mute-mic",
                     "label": "Mic",
