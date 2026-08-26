@@ -63,6 +63,24 @@ let pageIndex = 0;
 let selectedButtonId = null;
 let dirty = false;
 
+/* macro-step expansion is UI-only state, keyed by the step object so it
+ * never touches the config model and follows a step across reorders. */
+const expandedSteps = new WeakSet();
+
+/* copy/paste clipboard, persisted in localStorage (survives reloads). */
+const clonePlain = (x) => JSON.parse(JSON.stringify(x));
+function clipSet(kind, obj) {
+    localStorage.setItem(`osp_clip_${kind}`, JSON.stringify(obj));
+}
+function clipGet(kind) {
+    try {
+        const v = localStorage.getItem(`osp_clip_${kind}`);
+        return v ? JSON.parse(v) : null;
+    } catch {
+        return null;
+    }
+}
+
 const $pages = $('[data-role="pages"]');
 const $buttons = $('[data-role="buttons"]');
 const $editor = $('[data-role="editor"]');
@@ -277,7 +295,8 @@ function renderButtons() {
         el('div', { class: 'buttons-head' },
             el('h2', {}, page.label || '(sin nombre)'),
             el('button', { class: 'btn btn-sm', onclick: () => addButton(false) }, '+ Botón'),
-            el('button', { class: 'btn btn-sm btn-ghost', onclick: () => addButton(true) }, '+ Hueco')
+            el('button', { class: 'btn btn-sm btn-ghost', onclick: () => addButton(true) }, '+ Hueco'),
+            clipGet('button') ? el('button', { class: 'btn btn-sm btn-ghost', onclick: pasteButton }, '📋 Pegar botón') : null
         )
     );
 
@@ -319,6 +338,18 @@ function addButton(isSpacer) {
     markDirty();
     renderButtons();
     renderEditor();
+}
+
+function pasteButton() {
+    const clip = clipGet('button');
+    if (!clip) return;
+    const btn = { ...clonePlain(clip), id: uid('btn') };
+    config.pages[pageIndex].buttons.push(btn);
+    selectedButtonId = btn.id;
+    markDirty();
+    renderButtons();
+    renderEditor();
+    showToast('Botón pegado.', 'ok');
 }
 
 /* ------------------------------------------------------------------ */
@@ -375,13 +406,32 @@ function renderEditor() {
 
     /* action editor */
     const actionCard = el('div', { class: 'card' },
-        el('div', { class: 'card-head' }, el('span', { class: 't' }, 'Acción')),
+        el('div', { class: 'card-head' },
+            el('span', { class: 't' }, 'Acción'),
+            el('span', { style: 'flex:1' }),
+            el('button', {
+                class: 'btn btn-sm btn-ghost', title: 'Copiar esta acción',
+                onclick: () => { clipSet('action', cell.action); renderEditor(); showToast('Acción copiada.', 'ok'); }
+            }, '⧉ Copiar'),
+            clipGet('action') ? el('button', {
+                class: 'btn btn-sm btn-ghost', title: 'Reemplazar por la acción copiada',
+                onclick: () => { cell.action = clonePlain(clipGet('action')); markDirty(); renderEditor(); renderButtons(); showToast('Acción pegada.', 'ok'); }
+            }, '📋 Pegar') : null
+        ),
         renderActionEditor(cell.action, (next) => { cell.action = next; markDirty(); renderEditor(); renderButtons(); }, { allowMacro: true })
     );
     $editor.append(actionCard);
 
     $editor.append(reorderRow(index, page));
-    $editor.append(el('button', { class: 'btn btn-danger', style: 'margin-top:12px', onclick: () => deleteButton(index) }, 'Eliminar botón'));
+    $editor.append(
+        el('div', { class: 'row', style: 'margin-top:12px' },
+            el('button', {
+                class: 'btn btn-sm btn-ghost',
+                onclick: () => { clipSet('button', cell); renderButtons(); showToast('Botón copiado (usa "Pegar botón").', 'ok'); }
+            }, '⧉ Copiar botón'),
+            el('button', { class: 'btn btn-sm btn-danger', onclick: () => deleteButton(index) }, 'Eliminar botón')
+        )
+    );
 }
 
 function reorderRow(index, page) {
@@ -550,42 +600,71 @@ async function loadFilters(source) {
 
 function renderMacroEditor(macro) {
     const box = el('div', {});
-    box.append(el('div', { class: 'card-head' }, el('span', { class: 't' }, `Pasos (${macro.steps.length})`)));
+
+    const allExpanded = macro.steps.length > 0 && macro.steps.every((s) => expandedSteps.has(s));
+    box.append(el('div', { class: 'card-head' },
+        el('span', { class: 't' }, `Pasos (${macro.steps.length})`),
+        el('span', { style: 'flex:1' }),
+        macro.steps.length > 0
+            ? el('button', {
+                class: 'btn btn-sm btn-ghost',
+                onclick: () => {
+                    if (allExpanded) macro.steps.forEach((s) => expandedSteps.delete(s));
+                    else macro.steps.forEach((s) => expandedSteps.add(s));
+                    renderEditor();
+                }
+            }, allExpanded ? 'Colapsar todo' : 'Expandir todo')
+            : null
+    ));
 
     macro.steps.forEach((step, i) => {
-        const stepBox = el('div', { class: 'step' });
         const isDelay = step.delayMs !== undefined && step.action === undefined;
+        const expanded = expandedSteps.has(step);
+        const summary = isDelay ? `Espera ${step.delayMs ?? 0} ms` : actionSummary(step.action);
+
+        const stepBox = el('div', { class: `step${expanded ? '' : ' collapsed'}` });
 
         stepBox.append(el('div', { class: 'step-head' },
-            el('span', { class: 'n' }, `${i + 1}`),
-            el('select', {
-                onchange: (e) => {
-                    if (e.target.value === 'delay') { macro.steps[i] = { delayMs: 300 }; }
-                    else { macro.steps[i] = { action: defaultAction('obs.sourceVisibility') }; }
-                    markDirty(); renderEditor();
-                }
+            el('span', {
+                class: 'step-summary',
+                onclick: () => { if (expanded) expandedSteps.delete(step); else expandedSteps.add(step); renderEditor(); }
             },
-                el('option', { value: 'action', selected: !isDelay }, 'Acción'),
-                el('option', { value: 'delay', selected: isDelay }, 'Espera (ms)')
+                el('span', { class: 'caret' }, expanded ? '▾' : '▸'),
+                el('span', { class: 'n' }, `${i + 1}`),
+                el('span', { class: 'sum' }, summary || '(vacío)')
             ),
-            el('span', { style: 'flex:1' }),
+            el('button', { class: 'btn btn-sm btn-ghost', title: 'Copiar paso', onclick: () => { clipSet('step', step); renderEditor(); showToast('Paso copiado.', 'ok'); } }, '⧉'),
             el('button', { class: 'btn btn-sm btn-ghost', title: 'Subir', onclick: () => moveStep(macro, i, -1) }, '↑'),
             el('button', { class: 'btn btn-sm btn-ghost', title: 'Bajar', onclick: () => moveStep(macro, i, 1) }, '↓'),
             el('button', { class: 'btn btn-sm btn-ghost', title: 'Eliminar', onclick: () => { macro.steps.splice(i, 1); markDirty(); renderEditor(); } }, '✕')
         ));
 
-        if (isDelay) {
-            stepBox.append(field('Milisegundos', numInput(step.delayMs, 0, 60000, (v) => { step.delayMs = v; markDirty(); })));
-        } else {
-            if (!step.action) step.action = defaultAction('obs.sourceVisibility');
-            stepBox.append(renderActionEditor(step.action, (next) => { step.action = next; markDirty(); renderEditor(); }, { allowMacro: false }));
+        if (expanded) {
+            const body = el('div', { class: 'step-body' });
+            body.append(field('Tipo de paso', selectInput(isDelay ? 'delay' : 'action', [['action', 'Acción'], ['delay', 'Espera (ms)']], (v) => {
+                const next = v === 'delay' ? { delayMs: 300 } : { action: defaultAction('obs.sourceVisibility') };
+                macro.steps[i] = next;
+                expandedSteps.add(next);
+                markDirty(); renderEditor();
+            })));
+            if (isDelay) {
+                body.append(field('Milisegundos', numInput(step.delayMs, 0, 60000, (v) => { step.delayMs = v; markDirty(); })));
+            } else {
+                if (!step.action) step.action = defaultAction('obs.sourceVisibility');
+                body.append(renderActionEditor(step.action, (nextA) => { step.action = nextA; markDirty(); renderEditor(); }, { allowMacro: false }));
+            }
+            stepBox.append(body);
         }
         box.append(stepBox);
     });
 
+    const addStep = (make) => { const s = make(); macro.steps.push(s); expandedSteps.add(s); markDirty(); renderEditor(); };
     box.append(el('div', { class: 'row', style: 'margin-top:4px' },
-        el('button', { class: 'btn btn-sm', onclick: () => { macro.steps.push({ action: defaultAction('obs.sourceVisibility') }); markDirty(); renderEditor(); } }, '+ Acción'),
-        el('button', { class: 'btn btn-sm', onclick: () => { macro.steps.push({ delayMs: 300 }); markDirty(); renderEditor(); } }, '+ Espera')
+        el('button', { class: 'btn btn-sm', onclick: () => addStep(() => ({ action: defaultAction('obs.sourceVisibility') })) }, '+ Acción'),
+        el('button', { class: 'btn btn-sm', onclick: () => addStep(() => ({ delayMs: 300 })) }, '+ Espera'),
+        clipGet('step')
+            ? el('button', { class: 'btn btn-sm btn-ghost', onclick: () => addStep(() => clonePlain(clipGet('step'))) }, '📋 Pegar paso')
+            : null
     ));
 
     box.append(el('button', {

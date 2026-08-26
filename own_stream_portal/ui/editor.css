@@ -381,21 +381,53 @@ textarea {
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: 8px;
-    padding: 10px;
-    margin-bottom: 8px;
+    padding: 8px 10px;
+    margin-bottom: 6px;
 }
 
 .step-head {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 8px;
+    gap: 3px;
 }
 
-.step-head .n {
+.step-summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+    cursor: pointer;
+    padding: 3px 0;
+}
+
+.step-summary .caret {
+    color: var(--text-dim);
+    font-size: 11px;
+    width: 12px;
+    flex: none;
+}
+
+.step-summary .n {
     font-size: 11px;
     color: var(--text-dim);
-    width: 20px;
+    width: 18px;
+    flex: none;
+}
+
+.step-summary .sum {
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.step-summary:hover .sum {
+    color: var(--accent);
+}
+
+.step-body {
+    margin-top: 8px;
 }
 
 .swatch-row {
