@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<!--
+====================================================================
+  Scoreboard diagnostics — "why does the picker show no matches?"
+====================================================================
+  Open this file in the SAME browser (or OBS browser source) as
+  scoreboard-apifootball.html. It reads the very same localStorage
+  keys the scoreboard uses, so it tests the configuration that is
+  actually in effect — not a fresh one.
+
+  It probes each layer independently so the broken one is obvious:
+
+    1. Relay (Cloudflare Worker)  -> /, /debug, /live, /day
+    2. ESPN direct from browser   -> can the page skip the relay?
+    3. API-Football               -> key valid? quota left?
+    4. TheSportsDB                -> the no-key fallback
+
+  Nothing here writes to the scoreboard state; it is read-only
+  except for the two input fields, which save back to localStorage
+  so you can fix the relay URL / API key from here.
+-->
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scoreboard diagnostics</title>
+    <style>
+        :root {
+            --bg: #0e1020;
+            --card: #141728;
+            --line: #2a2f4d;
+            --text: #e9ecf5;
+            --muted: #8b90ad;
+            --ok: #01C853;
+            --warn: #FF8A00;
+            --err: #FF3B01;
+            --accent: #3150F6;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font: 15px/1.5 'Segoe UI', Arial, sans-serif;
+            padding: 24px;
+            max-width: 980px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 22px;
+            margin-bottom: 4px;
+        }
+
+        .sub {
+            color: var(--muted);
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .cfg {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 14px;
+            margin-bottom: 16px;
+        }
+
+        label {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            color: var(--muted);
+        }
+
+        input {
+            background: #1a1d33;
+            border: 1px solid #303656;
+            color: var(--text);
+            border-radius: 6px;
+            padding: 8px 10px;
+            font: inherit;
+            font-size: 14px;
+        }
+
+        button {
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            padding: 10px 18px;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        button:hover {
+            filter: brightness(1.12);
+        }
+
+        button:disabled {
+            opacity: .55;
+            cursor: default;
+        }
+
+        .test {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-left: 4px solid var(--muted);
+            border-radius: 10px;
+            padding: 12px 14px;
+            margin-bottom: 10px;
+        }
+
+        .test.ok {
+            border-left-color: var(--ok);
+        }
+
+        .test.warn {
+            border-left-color: var(--warn);
+        }
+
+        .test.err {
+            border-left-color: var(--err);
+        }
+
+        .test h3 {
+            font-size: 15px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .tag {
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: .5px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: #262a47;
+            color: var(--muted);
+        }
+
+        .test.ok .tag {
+            background: var(--ok);
+            color: #04270f;
+        }
+
+        .test.warn .tag {
+            background: var(--warn);
+            color: #2a1600;
+        }
+
+        .test.err .tag {
+            background: var(--err);
+            color: #fff;
+        }
+
+        .test p {
+            color: var(--muted);
+            font-size: 14px;
+            margin-top: 6px;
+        }
+
+        .test .fix {
+            color: #cfd3ee;
+            border-top: 1px dashed var(--line);
+            margin-top: 10px;
+            padding-top: 8px;
+            font-size: 14px;
+        }
+
+        pre {
+            background: #0b0d1a;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 10px;
+            margin-top: 8px;
+            font-size: 12.5px;
+            overflow-x: auto;
+            max-height: 240px;
+            color: #b9c0e8;
+        }
+
+        .verdict {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 16px;
+            margin-bottom: 16px;
+            display: none;
+        }
+
+        .verdict.show {
+            display: block;
+        }
+
+        .verdict h2 {
+            font-size: 17px;
+            margin-bottom: 8px;
+        }
+
+        .verdict ul {
+            margin-left: 20px;
+            color: #cfd3ee;
+            font-size: 14px;
+        }
+
+        code {
+            background: #0b0d1a;
+            padding: 1px 5px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Scoreboard diagnostics</h1>
+    <div class="sub">Tests each data layer separately, using the settings your scoreboard has stored right now.</div>
+
+    <div class="cfg">
+        <label for="relay">Relay URL</label>
+        <input id="relay" type="text" placeholder="https://….workers.dev" style="width:290px">
+        <label for="key">API-Football key</label>
+        <input id="key" type="text" placeholder="(optional)" style="width:230px">
+        <button id="run">Run all tests</button>
+    </div>
+
+    <div class="verdict" id="verdict"></div>
+    <div id="results"></div>
+
+    <script>
+        'use strict';
+
+        // Same keys scoreboard-apifootball.html uses, so we read the live config.
+        const RELAY_STORE = 'scoreboard_relay_url';
+        const KEY_STORE = 'scoreboard_apifootball_key';
+        const QUOTA_STORE = 'scoreboard_apifootball_quota';
+
+        const ESPN = 'https://site.api.espn.com/apis/site/v2/sports/soccer';
+        const SAMPLE_LEAGUES = ['esp.1', 'arg.1', 'chi.1', 'bra.1'];
+
+        const $ = (id) => document.getElementById(id);
+        const results = $('results');
+        const today = () => new Date().toISOString().slice(0, 10);
+
+        const relayEl = $('relay'), keyEl = $('key');
+        relayEl.value = localStorage.getItem(RELAY_STORE) || '';
+        keyEl.value = localStorage.getItem(KEY_STORE) || '';
+        relayEl.addEventListener('input', () => localStorage.setItem(RELAY_STORE, relayEl.value.trim().replace(/\/+$/, '')));
+        keyEl.addEventListener('input', () => localStorage.setItem(KEY_STORE, keyEl.value.trim()));
+
+        function card(title, status, body, fix, dump) {
+            const el = document.createElement('div');
+            el.className = 'test ' + status;
+            const label = { ok: 'PASS', warn: 'CHECK', err: 'FAIL', '': 'RUNNING' }[status] || '';
+            el.innerHTML = `<h3><span class="tag">${label}</span>${title}</h3>` +
+                (body ? `<p>${body}</p>` : '') +
+                (fix ? `<div class="fix">${fix}</div>` : '') +
+                (dump ? `<pre>${dump.replace(/[<&]/g, c => c === '<' ? '&lt;' : '&amp;')}</pre>` : '');
+            results.appendChild(el);
+            return el;
+        }
+
+        // fetch with a timeout, returning a uniform result object.
+        async function probe(url, opts = {}, ms = 25000) {
+            const ctl = new AbortController();
+            const t = setTimeout(() => ctl.abort(), ms);
+            try {
+                const r = await fetch(url, { ...opts, signal: ctl.signal });
+                const text = await r.text();
+                let json = null;
+                try { json = JSON.parse(text); } catch (e) { /* not json */ }
+                return { ok: r.ok, status: r.status, json, text };
+            } catch (e) {
+                // A CORS rejection and a dead host both land here — the browser
+                // deliberately hides which, so say so rather than guessing.
+                return { ok: false, status: 0, error: String(e.message || e) };
+            } finally { clearTimeout(t); }
+        }
+
+        const findings = [];
+
+        /* ---- 1. relay ------------------------------------------------ */
+        async function testRelay(base) {
+            if (!base) {
+                card('Relay — not configured', 'warn',
+                    'The Relay field is empty, so the scoreboard is NOT using the Cloudflare Worker. Live/Day/Find fall through to API-Football, which needs a key.',
+                    'If you deployed worker.js, paste its <code>*.workers.dev</code> URL above. Otherwise the relay tests below are skipped.');
+                findings.push('Relay URL is not set — the scoreboard is on the API-Football path, not the relay.');
+                return;
+            }
+
+            const root = await probe(base + '/');
+            if (!root.ok) {
+                card('Relay — unreachable', 'err',
+                    `GET ${base}/ returned ${root.status || 'a network/CORS error'}. ${root.error || ''}`,
+                    'Check the URL is exact (no trailing slash, https), and that the Worker is deployed and not paused.',
+                    root.text ? root.text.slice(0, 400) : '');
+                findings.push('The relay itself is unreachable — nothing downstream can work.');
+                return;
+            }
+            card('Relay — reachable', 'ok', `GET ${base}/ responded 200.`, '',
+                JSON.stringify(root.json, null, 1).slice(0, 400));
+
+            // /debug is the decisive one: it separates "ESPN blocked us" from
+            // "ESPN answered, there is simply nothing on".
+            const dbg = await probe(base + '/debug');
+            if (!dbg.ok || !dbg.json) {
+                card('Relay /debug — missing', 'warn',
+                    `GET ${base}/debug returned ${dbg.status}. Your deployed Worker predates the /debug endpoint.`,
+                    'Re-deploy the updated <code>worker.js</code> from this repo, then re-run. Without it, a blocked upstream is invisible.');
+                findings.push('Deployed Worker is an older build (no /debug) — re-deploy worker.js.');
+            } else {
+                const d = dbg.json;
+                const errs = (d.leagues || []).filter(l => l.error);
+                if (d.leaguesOk === 0) {
+                    card('Relay /debug — ESPN rejected every league', 'err',
+                        `0 of ${d.leaguesTotal} leagues answered. This is the cause of the empty match picker.`,
+                        'ESPN is blocking the Worker (usually Akamai 403). Edit the <code>HEADERS</code> block in worker.js and re-deploy.',
+                        errs.slice(0, 6).map(l => `${l.slug}: ${l.error}`).join('\n'));
+                    findings.push(`ESPN refused all ${d.leaguesTotal} leagues from the Worker — see the errors above.`);
+                } else if (d.totalEvents === 0) {
+                    card('Relay /debug — ESPN OK but no fixtures', 'warn',
+                        `${d.leaguesOk}/${d.leaguesTotal} leagues answered, but they list 0 matches for ${d.date}.`,
+                        'Not a bug: none of the configured leagues play in this window. Try Day with a date that has fixtures.');
+                    findings.push('Relay works, but the configured leagues have no fixtures in this window.');
+                } else {
+                    card('Relay /debug — healthy', d.inProgress ? 'ok' : 'warn',
+                        `${d.leaguesOk}/${d.leaguesTotal} leagues OK · ${d.totalEvents} matches · ${d.inProgress} in progress right now.`,
+                        d.inProgress ? '' : 'Fixtures exist but none are live, so <b>Live</b> is correctly empty — use <b>Day</b> instead.',
+                        errs.length ? errs.map(l => `${l.slug}: ${l.error}`).join('\n') : '');
+                    if (!d.inProgress) findings.push('Nothing is live right now — "Live" is empty by design; use "Day".');
+                }
+            }
+
+            for (const [path, label] of [['/live', 'Live'], ['/day?date=' + today(), 'Day (today)']]) {
+                const r = await probe(base + path);
+                const n = r.json && r.json.events ? r.json.events.length : 0;
+                const diag = r.json && r.json.diag;
+                card(`Relay ${path} — ${n} match(es)`, r.ok ? (n ? 'ok' : 'warn') : 'err',
+                    r.ok ? `${label} returned ${n} match(es).` + (diag ? ` Upstream: ${diag.leaguesOk}/${diag.leaguesTotal} leagues.` : '')
+                        : `HTTP ${r.status}. ${r.error || ''}`,
+                    (r.ok && !n) ? 'An empty list here with healthy /debug means there genuinely are no matches in that window.' : '',
+                    n ? (r.json.events.slice(0, 6).map(e => `${e.league}: ${e.home} ${e.a}-${e.b} ${e.away} [${e.detail || e.statusType}]`).join('\n')) : '');
+            }
+        }
+
+        /* ---- 2. ESPN straight from the browser ----------------------- */
+        async function testEspnDirect() {
+            let ok = 0, total = 0, live = 0, lines = [];
+            for (const slug of SAMPLE_LEAGUES) {
+                const r = await probe(`${ESPN}/${slug}/scoreboard`);
+                if (r.ok && r.json) {
+                    ok++;
+                    const evs = r.json.events || [];
+                    total += evs.length;
+                    evs.forEach(e => {
+                        const st = (e.status && e.status.type) || {};
+                        if (st.state === 'in') { live++; lines.push(`${slug}: ${e.shortName} — ${st.shortDetail}`); }
+                    });
+                } else {
+                    lines.push(`${slug}: FAILED (${r.status || 'CORS/network'}) ${r.error || ''}`);
+                }
+            }
+            card(`ESPN direct from this browser — ${ok}/${SAMPLE_LEAGUES.length} leagues`,
+                ok === SAMPLE_LEAGUES.length ? 'ok' : (ok ? 'warn' : 'err'),
+                `${total} matches found, ${live} live, calling ESPN with no relay in between.`,
+                ok === SAMPLE_LEAGUES.length
+                    ? 'ESPN sends <code>Access-Control-Allow-Origin: *</code>, so this page can read it directly. If the relay is the broken part, the scoreboard could query ESPN itself and drop the Worker entirely.'
+                    : 'Direct calls are being blocked here, so the relay is genuinely needed.',
+                lines.slice(0, 10).join('\n'));
+            if (ok === SAMPLE_LEAGUES.length) findings.push('ESPN is reachable directly from the browser — the Worker is optional.');
+        }
+
+        /* ---- 3. API-Football ----------------------------------------- */
+        async function testApiFootball(key) {
+            let q = { count: 0 };
+            try { q = JSON.parse(localStorage.getItem(QUOTA_STORE) || 'null') || q; } catch (e) { /* ignore */ }
+
+            if (!key) {
+                card('API-Football — no key', 'warn',
+                    'No key stored. Without a relay, the Live/Day/Find buttons stop at "Paste your api-sports.io key first."',
+                    'Either set a relay URL, or paste an api-sports.io key above.');
+                findings.push('No API-Football key stored.');
+                return;
+            }
+            const r = await probe('https://v3.football.api-sports.io/status', { headers: { 'x-apisports-key': key } });
+            const errs = r.json && r.json.errors;
+            const hasErr = errs && (Array.isArray(errs) ? errs.length : Object.keys(errs).length);
+            if (hasErr) {
+                card('API-Football — key rejected', 'err', 'The key was not accepted.',
+                    'Copy the key again from your api-sports.io dashboard. Every call will fall through to TheSportsDB until this is fixed.',
+                    JSON.stringify(errs, null, 1));
+                findings.push('The API-Football key is invalid — that path always falls back.');
+                return;
+            }
+            const resp = (r.json && r.json.response) || {};
+            const req = resp.requests || {};
+            const used = req.current, limit = req.limit_day;
+            const spent = (limit && used >= limit);
+            card('API-Football — key valid', spent ? 'err' : 'ok',
+                `Plan: ${(resp.subscription && resp.subscription.plan) || '?'} · today ${used}/${limit} requests used. Local counter says ${q.count}.`,
+                spent ? 'Daily quota is exhausted — every request now errors and silently falls back to TheSportsDB.' : '',
+                JSON.stringify(resp, null, 1).slice(0, 500));
+            if (spent) findings.push('API-Football daily quota is used up.');
+        }
+
+        /* ---- 4. TheSportsDB fallback --------------------------------- */
+        async function testTsdb() {
+            const r = await probe(`https://www.thesportsdb.com/api/v1/json/3/eventsday.php?d=${today()}&s=Soccer`);
+            const evs = (r.json && r.json.events) || [];
+            card(`TheSportsDB fallback — ${evs.length} match(es) today`,
+                r.ok ? (evs.length ? 'ok' : 'warn') : 'err',
+                r.ok ? `The free no-key fallback lists ${evs.length} soccer match(es) for ${today()}.` : `HTTP ${r.status}. ${r.error || ''}`,
+                'This source has no live feed and no elapsed minute, so it can fill teams but never drive the clock.',
+                evs.slice(0, 6).map(e => `${e.strLeague}: ${e.strHomeTeam} vs ${e.strAwayTeam} [${e.strStatus || 'NS'}]`).join('\n'));
+        }
+
+        /* ---- runner --------------------------------------------------- */
+        $('run').addEventListener('click', async () => {
+            const btn = $('run');
+            btn.disabled = true; btn.textContent = 'Running…';
+            results.innerHTML = '';
+            $('verdict').classList.remove('show');
+            findings.length = 0;
+
+            const base = relayEl.value.trim().replace(/\/+$/, '');
+            await testRelay(base);
+            await testEspnDirect();
+            await testApiFootball(keyEl.value.trim());
+            await testTsdb();
+
+            const v = $('verdict');
+            v.innerHTML = '<h2>Summary</h2>' + (findings.length
+                ? '<ul>' + findings.map(f => `<li>${f}</li>`).join('') + '</ul>'
+                : '<p>Every layer passed. If the picker is still empty, the window you asked for genuinely has no matches.</p>');
+            v.classList.add('show');
+            btn.disabled = false; btn.textContent = 'Run all tests';
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+
+        $('run').click();
+    </script>
+</body>
+
+</html>

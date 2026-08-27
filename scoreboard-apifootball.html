@@ -29,7 +29,17 @@
     must run in the SAME browser context (both OBS Browser Sources, or
     both tabs in one browser).
 
-  DATA (hybrid) — API-Football (api-sports.io), v3:
+  DATA — sources are tried in this order:
+    1. ESPN, called DIRECTLY from this page (default, no key, no quota).
+       ESPN sends Access-Control-Allow-Origin:*, and a real browser is not
+       caught by the Akamai bot filter that 403s server-side callers — which
+       is why the Cloudflare relay below stopped returning matches. Edit
+       ESPN_LEAGUES to change which competitions are polled.
+    2. Relay (worker.js) — only if a Relay URL is set. Optional now; useful
+       if a network blocks ESPN directly. Falls through to ESPN on failure.
+    3. API-Football, then TheSportsDB (below) as last resorts.
+
+  API-Football (api-sports.io), v3 — legacy path:
     Auth: header  x-apisports-key: <YOUR KEY>   (free plan = 100 req/day)
     Paste the key in the control panel (stored locally) or set
     CONFIG.API_KEY below. Direct api-sports.io endpoints send CORS
@@ -1171,7 +1181,9 @@
             <!-- Row 1 — API -->
             <div class="ctl-row">
                 <span class="lbl">Relay</span>
-                <input type="text" data-relay-url placeholder="https://…workers.dev (live source)" style="width:230px">
+                <input type="text" data-relay-url placeholder="optional — ESPN direct if empty"
+                    title="Leave empty to query ESPN straight from the browser. Only set this if direct calls are blocked on your network."
+                    style="width:230px">
                 <span class="ctl-sep"></span>
                 <span class="lbl">API</span>
                 <input type="text" data-api-key placeholder="api-sports.io key (optional)" style="width:200px">
@@ -1251,7 +1263,8 @@
             <div class="ctl-row">
                 <span class="lbl">Penalties</span>
                 <label class="toggle"><input type="checkbox" data-show-pens> Show shootout</label>
-                <button class="green" data-pens-refresh title="Fetch latest penalty kicks from ESPN">🔄 Refresh kicks</button>
+                <button class="green" data-pens-refresh title="Fetch latest penalty kicks from ESPN">🔄 Refresh
+                    kicks</button>
                 <span class="lbl">Score:</span>
                 <input type="number" data-pens-a min="0" value="0" style="width:50px">
                 <span class="lbl">-</span>
@@ -1319,7 +1332,7 @@
             FALLBACK: true,         // option B: on limit/error, fall back to TheSportsDB (no live, delayed)
             TSDB_BASE: 'https://www.thesportsdb.com/api/v1/json/3',  // free, CORS-friendly, no key
             RELAY_URL: '',          // SofaScore relay (Cloudflare Worker) — paste it in the panel
-            RELAY_POLL_MS: 30000,   // live auto-poll against the relay (uncapped, real-time-ish)
+            RELAY_POLL_MS: 15000,   // live auto-poll interval (ESPN sends cache-control: max-age=5)
             FLAG_BASE: 'https://flagcdn.com/w80',  // 2-letter ISO code -> flag image (CORS-friendly)
             SYNC_POLL_MS: 500       // localStorage polling fallback (OBS-safe)
         };
@@ -1343,6 +1356,10 @@
                 showClock: true,
                 pens: { show: false, a: 0, b: 0, home: [], away: [] },   // shootout tag + kick dots
                 logo: 'WC26_Logo.avif',   // which emblem image the logo slot shows
+                // The match the live feed is following. selectedEvent itself is
+                // in-memory, so without this an OBS browser-source reload (scene
+                // switch, Refresh, restart) would silently end auto-updating.
+                watch: null,              // { id, date } of the followed fixture
                 adjust: {},     // per-element { x, y, scale } nudges keyed by data-adjust
                 rev: 0
             };
@@ -1745,6 +1762,22 @@
             if (el) el.style.background = color || '#000000';
         }
 
+        // Re-attach the live feed to the match saved in state after a reload.
+        // Only the id/date are needed; the rest of the board is already in state.
+        function resumeLivePoll() {
+            const w = state.watch;
+            if (!w || !w.id) return;
+            selectedEvent = {
+                idEvent: w.id, relayId: w.id, dateEvent: w.date || '',
+                strHomeTeam: state.teamA.name, strAwayTeam: state.teamB.name,
+                statusShort: (state.status === 'FT') ? 'FT' : 'LIVE',
+                _provider: 'live'
+            };
+            const t = $('[data-match-open]');
+            if (t) t.textContent = `${state.teamA.name} v ${state.teamB.name}`;
+            startLivePoll();
+        }
+
         /* ============================================================
            API CLIENT — API-Football (api-sports.io v3)
            Auth: header x-apisports-key. Direct endpoints are CORS-enabled,
@@ -1942,6 +1975,7 @@
 
         function selectMatch(ev) {
             selectedEvent = ev;
+            state.watch = (ev._provider === 'live') ? { id: ev.relayId || ev.idEvent, date: ev.dateEvent || '' } : null;
             const t = $('[data-match-open]'); if (t) t.textContent = `${ev.strHomeTeam} v ${ev.strAwayTeam}`;
             applySelectedApiMatch();
             closeMatchModal();
@@ -2018,7 +2052,13 @@
         async function relayGet(path) {
             const r = await fetch(CONFIG.RELAY_URL + path);
             if (!r.ok) throw new Error('relay ' + r.status);
-            return r.json();
+            const d = await r.json();
+            // The relay answers 200 with an empty list when every upstream league
+            // fails, so an explicit error/diag must be promoted to a real throw —
+            // otherwise an outage is indistinguishable from "nothing on today".
+            if (d && d.error) throw new Error(d.error);
+            if (d && d.diag && d.diag.leaguesOk === 0) throw new Error('relay reached ESPN on 0/' + d.diag.leaguesTotal + ' leagues — open ' + CONFIG.RELAY_URL + '/debug');
+            return d;
         }
         function relayStatusShort(ev) {
             if (ev.statusType === 'finished') return 'FT';
@@ -2040,53 +2080,213 @@
                 dateEvent: ev.startTs ? new Date(ev.startTs * 1000).toISOString().slice(0, 10) : '',
                 minute: ev.minute,
                 statusShort: relayStatusShort(ev),
-                _provider: 'relay'
+                _provider: 'live'
             };
         }
 
-        // Auto-poll the selected match through the relay (no API cap here).
+        /* ---- (D) ESPN direct from the browser — the DEFAULT live source.
+               ESPN answers with Access-Control-Allow-Origin:* and a real browser
+               is not caught by the Akamai bot filter that 403s the Cloudflare
+               Worker, so no relay is needed. These functions emit exactly the
+               same slim shape worker.js does, so normalizeRelay and everything
+               downstream stay unchanged. ---- */
+        const ESPN_BASE = 'https://site.api.espn.com/apis/site/v2/sports/soccer';
+        const ESPN_LEAGUES = [
+            'conmebol.libertadores', 'conmebol.sudamericana', 'conmebol.america',
+            'chi.1', 'chi.2', 'chi.super_cup', 'chi.copa_chi',
+        ];
+
+        async function espnGet(path) {
+            const r = await fetch(ESPN_BASE + path);
+            if (!r.ok) throw new Error('espn ' + r.status);
+            return r.json();
+        }
+
+        // status.clock caps at regular time, so added minutes come from
+        // displayClock ("90'+7'"). Scheduled matches have no clock.
+        function espnMinute(st) {
+            const t = st.type || {};
+            if (t.state !== 'in' && t.state !== 'post') return null;
+            if ((t.description || '').toLowerCase().includes('halftime')) return 45;
+            const m = /(\d+)'(?:\s*\+\s*(\d+))?/.exec(st.displayClock || '');
+            if (!m) return null;
+            return parseInt(m[1], 10) + (m[2] ? parseInt(m[2], 10) : 0);
+        }
+
+        function espnScore(s) { const n = parseInt(s, 10); return Number.isFinite(n) ? n : null; }
+
+        function espnSlim(e, leagueName, slug) {
+            const c = (e.competitions && e.competitions[0]) || {};
+            const cs = c.competitors || [];
+            const h = cs.find(x => x.homeAway === 'home') || cs[0] || {};
+            const a = cs.find(x => x.homeAway === 'away') || cs[1] || {};
+            const st = e.status || {};
+            const state = (st.type && st.type.state) || '';
+            return {
+                id: 'espn:' + slug + ':' + e.id,
+                home: h.team && h.team.displayName, away: a.team && a.team.displayName,
+                homeAbbr: h.team && h.team.abbreviation, awayAbbr: a.team && a.team.abbreviation,
+                homeCrest: (h.team && h.team.logo) || '', awayCrest: (a.team && a.team.logo) || '',
+                a: espnScore(h.score), b: espnScore(a.score),
+                soA: espnScore(h.shootoutScore), soB: espnScore(a.shootoutScore),
+                statusType: state === 'in' ? 'inprogress' : (state === 'post' ? 'finished' : 'notstarted'),
+                statusDesc: (st.type && st.type.description) || '',
+                detail: (st.type && st.type.shortDetail) || '',
+                minute: espnMinute(st),
+                league: leagueName || slug, country: '',
+                startTs: e.date ? Math.floor(Date.parse(e.date) / 1000) : null
+            };
+        }
+
+        // Fan out over the league list. A single failing league is tolerated, but
+        // an all-fail is thrown — never reported as "no matches" (that ambiguity
+        // is exactly what made the relay outage impossible to diagnose).
+        async function espnAll(ymd) {
+            const results = await Promise.all(ESPN_LEAGUES.map(async slug => {
+                try {
+                    const d = await espnGet(`/${slug}/scoreboard${ymd ? '?dates=' + ymd : ''}`);
+                    const name = (d.leagues && d.leagues[0] && d.leagues[0].name) || slug;
+                    return (d.events || []).map(e => espnSlim(e, name, slug));
+                } catch (e) { return null; }
+            }));
+            const ok = results.filter(Boolean);
+            if (!ok.length) throw new Error(`ESPN unreachable — all ${ESPN_LEAGUES.length} leagues failed`);
+            return ok.flat();
+        }
+
+        const ymdOf = (date) => (date || '').replace(/-/g, '');
+
+        async function espnLive() { return (await espnAll()).filter(e => e.statusType === 'inprogress'); }
+        async function espnDay(date) { return espnAll(ymdOf(date)); }
+
+        async function espnMatch(id, date) {
+            const p = (id || '').split(':');           // ['espn', slug, eventId]
+            if (p[0] !== 'espn' || !p[1] || !p[2]) return null;
+            const find = async (ymd) => {
+                try {
+                    const d = await espnGet(`/${p[1]}/scoreboard${ymd ? '?dates=' + ymd : ''}`);
+                    const name = (d.leagues && d.leagues[0] && d.leagues[0].name) || p[1];
+                    return (d.events || []).map(e => espnSlim(e, name, p[1])).find(e => e.id === id) || null;
+                } catch (e) { return null; }
+            };
+            // Try the match's own date first, then the league's default window.
+            // Both are needed: the default window only spans the current
+            // matchday, while dateEvent is a UTC date and ESPN buckets its
+            // ?dates= by US Eastern — so a late kickoff can sit on either side.
+            for (const w of (date ? [ymdOf(date), null] : [null])) {
+                const ev = await find(w);
+                if (ev) return ev;
+            }
+            return null;
+        }
+
+        async function espnShots(id) {
+            const p = (id || '').split(':');
+            if (p[0] !== 'espn' || !p[1] || !p[2]) return { home: [], away: [] };
+            const sum = await espnGet(`/${p[1]}/summary?event=${p[2]}`);
+            const arr = Array.isArray(sum.shootout) ? sum.shootout : [];
+            const cs = (sum.header && sum.header.competitions && sum.header.competitions[0] && sum.header.competitions[0].competitors) || [];
+            const nameOf = side => { const c = cs.find(x => x.homeAway === side); return (c && c.team && c.team.displayName) || ''; };
+            const seqOf = name => { const t = arr.find(x => (x.team || '').toLowerCase() === name.toLowerCase()); return t ? (t.shots || []).map(s => !!s.didScore) : []; };
+            let home = seqOf(nameOf('home')), away = seqOf(nameOf('away'));
+            if (!home.length && !away.length && arr.length === 2) {
+                home = (arr[0].shots || []).map(s => !!s.didScore);
+                away = (arr[1].shots || []).map(s => !!s.didScore);
+            }
+            return { home, away };
+        }
+
+        /* ---- live-source abstraction. Both sources yield the same slim events,
+               so they are interchangeable. Order of preference: an explicitly
+               configured relay first, then ESPN direct — a relay that ESPN has
+               started blocking must not take the page down when the browser can
+               still reach ESPN itself. ---- */
+        function relaySource() {
+            return {
+                label: 'relay',
+                live: async () => (await relayGet('/live')).events || [],
+                day: async (d) => (await relayGet('/day?date=' + d)).events || [],
+                match: async (id, d) => (await relayGet('/match?id=' + encodeURIComponent(id) + (d ? '&date=' + d : ''))).event || null,
+                shots: async (id) => await relayGet('/shots?id=' + encodeURIComponent(id))
+            };
+        }
+        function espnSource() {
+            return { label: 'ESPN', live: espnLive, day: espnDay, match: espnMatch, shots: espnShots };
+        }
+        function liveSources() { return relayReady() ? [relaySource(), espnSource()] : [espnSource()]; }
+
+        // Run one live-source operation, walking the preference list on failure.
+        async function fromLive(op, label) {
+            const errs = [];
+            for (const src of liveSources()) {
+                try {
+                    const evs = await op(src);
+                    populateEvents(evs.map(normalizeRelay), label + (src.label === 'ESPN' ? '' : ' (via relay)'));
+                    return true;
+                } catch (e) { errs.push(`${src.label}: ${e.message || e}`); }
+            }
+            apiStatus('Live source failed — ' + errs.join(' · '), 'err');
+            return false;
+        }
+
+        async function liveMatch(id, date) {
+            for (const src of liveSources()) {
+                try { const ev = await src.match(id, date); if (ev) return ev; } catch (e) { /* try next */ }
+            }
+            return null;
+        }
+        async function liveShots(id) {
+            for (const src of liveSources()) {
+                try { return await src.shots(id); } catch (e) { /* try next */ }
+            }
+            return { home: [], away: [] };
+        }
+
+        // Auto-poll the selected match (no API cap on either live source).
         function startLivePoll() {
             stopLivePoll();
-            if (!relayReady() || !selectedEvent || selectedEvent._provider !== 'relay') return;
+            if (!selectedEvent || selectedEvent._provider !== 'live') return;
             if (selectedEvent.statusShort === 'FT') return;   // finished — clock already frozen, no need to poll
             livePollTimer = setInterval(relayTick, CONFIG.RELAY_POLL_MS);
+            relayTick();   // fire now: setInterval alone leaves the board stale for a whole interval
         }
         function stopLivePoll() { if (livePollTimer) { clearInterval(livePollTimer); livePollTimer = null; } }
         async function relayTick() {
-            if (!selectedEvent || selectedEvent._provider !== 'relay') { stopLivePoll(); return; }
+            if (!selectedEvent || selectedEvent._provider !== 'live') { stopLivePoll(); return; }
             try {
-                const d = await relayGet('/match?id=' + encodeURIComponent(selectedEvent.relayId));
-                const ev = d.event ? normalizeRelay(d.event) : null;
-                if (!ev) return;
+                const raw = await liveMatch(selectedEvent.relayId, selectedEvent.dateEvent);
+                const ev = raw ? normalizeRelay(raw) : null;
+                if (!ev) { apiStatus(`Live update: match not found upstream (${stamp()}) — still retrying.`, 'err'); return; }
                 state.scoreA = toScore(ev.intHomeScore);
                 state.scoreB = toScore(ev.intAwayScore);
                 applyClockFromMinute(ev);
                 saveState(); syncControlsFromState();
                 if (state.pens && state.pens.show) loadShots();
-                if (ev.statusShort === 'FT') { apiStatus('Match finished — live updates stopped.', 'ok'); stopLivePoll(); }
-            } catch (e) { /* transient — try again next tick */ }
+                if (ev.statusShort === 'FT') { apiStatus('Match finished — live updates stopped.', 'ok'); stopLivePoll(); return; }
+                const when = ev.minute != null ? ev.minute + "'" : (ev.statusShort || '');
+                apiStatus(`● LIVE ${state.scoreA}-${state.scoreB} · ${when} · updated ${stamp()}`, 'ok');
+            } catch (e) {
+                // Never fail silently: an operator must be able to see the feed died.
+                apiStatus(`Live update failed (${stamp()}): ${e.message || e} — retrying in ${Math.round(CONFIG.RELAY_POLL_MS / 1000)}s.`, 'err');
+            }
         }
 
-        // Fetch the shootout kick sequence (made/missed per team) from the relay.
+        function stamp() { return new Date().toLocaleTimeString(); }
+
+        // Fetch the shootout kick sequence (made/missed per team).
         async function loadShots() {
-            if (!relayReady() || !selectedEvent || selectedEvent._provider !== 'relay') return;
+            if (!selectedEvent || selectedEvent._provider !== 'live') return;
             try {
-                const d = await relayGet('/shots?id=' + encodeURIComponent(selectedEvent.relayId));
+                const d = await liveShots(selectedEvent.relayId);
                 if (state.pens) { state.pens.home = d.home || []; state.pens.away = d.away || []; saveState(); }
             } catch (e) { /* transient */ }
         }
 
         async function loadLive() {
-            if (relayReady()) {
-                apiStatus('Loading live matches (relay)…');
-                try {
-                    const d = await relayGet('/live');
-                    populateEvents((d.events || []).map(normalizeRelay), '(live now)');
-                } catch (e) { apiStatus('Relay error: ' + e.message + ' — check the Relay URL.', 'err'); }
-                return;
-            }
-            if (!requireKey()) return;
             apiStatus('Loading live matches…');
+            if (await fromLive(src => src.live(), '(live now)')) return;
+            if (!requireKey()) return;
+            apiStatus('Loading live matches (API-Football)…');
             try {
                 if (overQuota()) throw new Error('Daily request limit reached');
                 const data = await apiGet('/fixtures?live=all');
@@ -2102,16 +2302,10 @@
         async function loadByDate() {
             const date = $('[data-api-date]').value;
             if (!date) { apiStatus('Pick a date first.', 'err'); return; }
-            if (relayReady()) {
-                apiStatus('Loading matches (relay)…');
-                try {
-                    const d = await relayGet('/day?date=' + date);
-                    populateEvents((d.events || []).map(normalizeRelay), `for ${date}`);
-                } catch (e) { apiStatus('Relay error: ' + e.message + ' — check the Relay URL.', 'err'); }
-                return;
-            }
-            if (!requireKey()) return;
             apiStatus('Loading day’s matches…');
+            if (await fromLive(src => src.day(date), `for ${date}`)) return;
+            if (!requireKey()) return;
+            apiStatus('Loading day’s matches (API-Football)…');
             try {
                 if (overQuota()) throw new Error('Daily request limit reached');
                 const data = await apiGet(`/fixtures?date=${date}`);
@@ -2124,17 +2318,13 @@
         async function loadByTeam() {
             const name = ($('[data-api-team]').value || '').trim();
             if (!name) { apiStatus('Type a team name first.', 'err'); return; }
-            if (relayReady()) {
-                apiStatus('Loading today’s matches to filter…');
-                try {
-                    const d = await relayGet('/day?date=' + todayStr());
-                    populateEvents((d.events || []).map(normalizeRelay), `for ${todayStr()}`);
-                    const s = $('[data-match-search]'); if (s) { s.value = name; renderMatchList(); }
-                } catch (e) { apiStatus('Relay error: ' + e.message + ' — check the Relay URL.', 'err'); }
+            apiStatus('Loading today’s matches to filter…');
+            if (await fromLive(src => src.day(todayStr()), `for ${todayStr()}`)) {
+                const s = $('[data-match-search]'); if (s) { s.value = name; renderMatchList(); }
                 return;
             }
             if (!requireKey()) return;
-            apiStatus('Searching team…');
+            apiStatus('Searching team (API-Football)…');
             try {
                 if (overQuota()) throw new Error('Daily request limit reached');
                 const tData = await apiGet(`/teams?search=${encodeURIComponent(name)}`);
@@ -2191,9 +2381,11 @@
         function applyPens(ev) {
             if (Number.isFinite(ev.soA) && Number.isFinite(ev.soB)) {
                 const prev = (state.pens && state.pens.show) ? state.pens : {};
-                state.pens = { show: true, a: ev.soA, b: ev.soB, home: prev.home || [], away: prev.away || [] };
-            } else {
-                state.pens = { show: false, a: 0, b: 0, home: [], away: [] };
+                state.pens = { show: true, auto: true, a: ev.soA, b: ev.soB, home: prev.home || [], away: prev.away || [] };
+            } else if (state.pens && state.pens.auto) {
+                // Only clear a shootout this feed put there — polling every 15s must
+                // never wipe one the operator switched on manually.
+                state.pens = { show: false, auto: false, a: 0, b: 0, home: [], away: [] };
             }
         }
 
@@ -2205,9 +2397,9 @@
         async function refreshScore() {
             if (!selectedEvent || !selectedEvent.idEvent) return false;
             let ev;
-            if (selectedEvent._provider === 'relay') {
-                const d = await relayGet('/match?id=' + encodeURIComponent(selectedEvent.relayId));
-                ev = d.event ? normalizeRelay(d.event) : null;
+            if (selectedEvent._provider === 'live') {
+                const raw = await liveMatch(selectedEvent.relayId, selectedEvent.dateEvent);
+                ev = raw ? normalizeRelay(raw) : null;
             } else if (selectedEvent._provider === 'tsdb') {
                 ev = await tsdbRefresh(selectedEvent.tsdbId);
             } else if (overQuota() && CONFIG.FALLBACK) {
@@ -2239,8 +2431,7 @@
 
         // Manually fetch the latest penalty kicks from the relay.
         async function refreshPenalties() {
-            if (!relayReady()) { apiStatus('Configure relay URL first.', 'err'); return; }
-            if (!selectedEvent || selectedEvent._provider !== 'relay') { apiStatus('Load a live match first.', 'err'); return; }
+            if (!selectedEvent || selectedEvent._provider !== 'live') { apiStatus('Load a live match first.', 'err'); return; }
             apiStatus('Fetching penalty kicks…');
             try {
                 await loadShots();
@@ -2263,6 +2454,11 @@
             if (['1H', '2H', 'ET', 'LIVE', 'P', 'NS'].includes(s)) return 'LIVE';
             return ev.statusShort || 'LIVE';
         }
+
+        // Last: resumeLivePoll assigns `selectedEvent` / `livePollTimer`, which are
+        // `let` bindings declared above — it must run after they initialise, so this
+        // stays at the very bottom of the script rather than inside initControl().
+        resumeLivePoll();
     </script>
 </body>
 

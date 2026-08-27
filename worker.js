@@ -13,9 +13,15 @@
      "Relay" field. Test: open <url>/live -> JSON with an "events" array.
 
    ENDPOINTS (CORS *, edge-cached):
-     GET /live               -> { events:[...] }  in-progress across leagues (cache 20s)
-     GET /day?date=YYYY-MM-DD -> { events:[...] } that day's matches         (cache 120s)
-     GET /match?id=espn:slug:eventId -> { event } one match's current state  (cache 15s)
+     GET /live               -> { events:[...], diag } in-progress across leagues (cache 20s)
+     GET /day?date=YYYY-MM-DD -> { events:[...], diag } that day's matches        (cache 120s)
+     GET /match?id=espn:slug:eventId[&date=YYYY-MM-DD] -> { event }               (cache 15s)
+     GET /debug[?date=YYYY-MM-DD] -> per-league HTTP outcome (no cache)
+
+   TROUBLESHOOTING "no matches": open <relay>/debug. leaguesOk:0 with a 403 on
+   every league means ESPN's bot filter rejected the Worker (see HEADERS below);
+   leaguesOk matching leaguesTotal with inProgress:0 simply means nothing is
+   being played right now.
 
    To cover more/other competitions, edit LEAGUES below (ESPN slugs).
    Crests are direct ESPN CDN URLs (work in <img> without CORS).
@@ -23,16 +29,29 @@
 
 const ESPN = 'https://site.api.espn.com/apis/site/v2/sports/soccer';
 const ESPN_CORE = 'https://sports.core.api.espn.com/v2/sports/soccer';
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+// Do NOT send a spoofed Chrome User-Agent here. ESPN sits behind Akamai bot
+// manager, which scores the UA together with the caller's TLS/HTTP fingerprint:
+// a browser UA from a non-browser client is a mismatch and can be answered with
+// 403 "Access Denied" on every league (reproducible from curl; Node's fetch is
+// currently let through, so the outcome varies by runtime). A plain client UA
+// plus gzip is treated as an ordinary API client and passed by both.
+// If /debug ever shows 403s, this header block is the first thing to change.
+const HEADERS = {
+  'User-Agent': 'obs-scoreboard-relay/1.0',
+  'Accept': 'application/json',
+  'Accept-Encoding': 'gzip',
+};
 
 // Curated competitions (ESPN slugs). Keep under ~40 (Worker subrequest limit 50).
 const LEAGUES = [
   'fifa.world', 'fifa.friendly', 'fifa.worldq.conmebol', 'fifa.worldq.uefa',
   'uefa.champions', 'uefa.europa', 'uefa.europa.conf', 'uefa.euro',
   'conmebol.libertadores', 'conmebol.sudamericana', 'conmebol.america',
-  'eng.1', 'esp.1', 'ita.1', 'ger.1', 'fra.1', 'por.1', 'ned.1',
-  'usa.1', 'mex.1', 'chi.1', 'chi.2', 'chi.super_cup', 'chi.copa_chi', 'arg.1', 'bra.1', 'col.1', 'uru.1', 'per.1', 'ecu.1', 'par.1',
+  // 'eng.1', 'esp.1', 'ita.1', 'ger.1', 'fra.1', 'por.1', 'ned.1', 'usa.1', 'mex.1', 'arg.1', 'bra.1', 'col.1', 'uru.1', 'per.1', 'ecu.1', 'par.1',
+  'chi.1', 'chi.2', 'chi.super_cup', 'chi.copa_chi',
 ];
+
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -48,11 +67,12 @@ export default {
       switch (url.pathname) {
         case '/live': return json(await getLive(), 20);
         case '/day': return json(await getDay(url.searchParams.get('date')), 120);
-        case '/match': return json(await getMatch(url.searchParams.get('id')), 15);
+        case '/match': return json(await getMatch(url.searchParams.get('id'), url.searchParams.get('date')), 15);
         case '/shots': return json(await getShots(url.searchParams.get('id')), 15);
         case '/leagues': return json(await getLeagues(), 3600);
+        case '/debug': return json(await getDebug(url.searchParams.get('date')), 0);
         case '/':
-        case '': return json({ ok: true, leagues: LEAGUES.length, endpoints: ['/live', '/day?date=YYYY-MM-DD', '/match?id=espn:slug:eventId', '/shots?id=espn:slug:eventId', '/leagues'] }, 60);
+        case '': return json({ ok: true, leagues: LEAGUES.length, endpoints: ['/live', '/day?date=YYYY-MM-DD', '/match?id=espn:slug:eventId', '/shots?id=espn:slug:eventId', '/leagues', '/debug'] }, 60);
         default: return json({ error: 'not found' }, 0, 404);
       }
     } catch (e) {
@@ -69,14 +89,14 @@ function json(obj, maxAge, status = 200) {
 }
 
 async function espn(path, ttl = 20) {
-  const res = await fetch(ESPN + path, { headers: { 'User-Agent': UA }, cf: { cacheTtl: ttl, cacheEverything: true } });
+  const res = await fetch(ESPN + path, { headers: HEADERS, cf: { cacheTtl: ttl, cacheEverything: true } });
   if (!res.ok) throw new Error('espn ' + res.status);
   return res.json();
 }
 
 // Discovery: every ESPN soccer competition slug (to add to LEAGUES above).
 async function getLeagues() {
-  const res = await fetch(`${ESPN_CORE}/leagues?limit=1000`, { headers: { 'User-Agent': UA }, cf: { cacheTtl: 3600, cacheEverything: true } });
+  const res = await fetch(`${ESPN_CORE}/leagues?limit=1000`, { headers: HEADERS, cf: { cacheTtl: 3600, cacheEverything: true } });
   if (!res.ok) throw new Error('espn-core ' + res.status);
   const d = await res.json();
   const all = (d.items || [])
@@ -124,32 +144,84 @@ function slim(e, leagueName, slug) {
   };
 }
 
-// One league's matches (optionally for a date). A failing league is skipped.
+// One league's matches (optionally for a date). A failing league does not sink
+// the whole response, but it is REPORTED rather than silently dropped —
+// swallowing these is what made an ESPN-wide 403 look like "no matches today".
 async function fetchLeague(slug, ymd) {
   try {
     const d = await espn(`/${slug}/scoreboard${ymd ? '?dates=' + ymd : ''}`);
     const name = (d.leagues && d.leagues[0] && d.leagues[0].name) || slug;
-    return (d.events || []).map(e => slim(e, name, slug));
-  } catch (e) { return []; }
+    return { slug, events: (d.events || []).map(e => slim(e, name, slug)) };
+  } catch (e) {
+    return { slug, events: [], error: String((e && e.message) || e) };
+  }
+}
+
+// Merge per-league results and attach a diagnostic block so an empty list can
+// always be told apart from a broken upstream.
+function merge(results) {
+  const failed = results.filter(r => r.error);
+  const out = {
+    events: results.flatMap(r => r.events),
+    diag: {
+      leaguesOk: results.length - failed.length,
+      leaguesTotal: results.length,
+      failed: failed.map(r => `${r.slug}: ${r.error}`),
+    },
+  };
+  // Every league failing is an upstream outage/block, not an empty schedule.
+  if (failed.length === results.length) out.error = 'all leagues failed: ' + (failed[0] || {}).error;
+  return out;
 }
 
 async function getLive() {
-  const all = (await Promise.all(LEAGUES.map(s => fetchLeague(s)))).flat();
-  return { events: all.filter(e => e.statusType === 'inprogress') };
+  const results = await Promise.all(LEAGUES.map(s => fetchLeague(s)));
+  const merged = merge(results);
+  merged.events = merged.events.filter(e => e.statusType === 'inprogress');
+  return merged;
 }
 
 async function getDay(date) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) throw new Error('bad date (YYYY-MM-DD)');
   const ymd = date.replace(/-/g, '');
-  const all = (await Promise.all(LEAGUES.map(s => fetchLeague(s, ymd)))).flat();
-  return { events: all };
+  return merge(await Promise.all(LEAGUES.map(s => fetchLeague(s, ymd))));
 }
 
-async function getMatch(id) {
+// Diagnostics: per-league HTTP outcome for one date (default: today's window).
+// Open <relay>/debug in a browser to see instantly whether ESPN is answering.
+async function getDebug(date) {
+  const ymd = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? date.replace(/-/g, '') : undefined;
+  const results = await Promise.all(LEAGUES.map(s => fetchLeague(s, ymd)));
+  return {
+    date: ymd || '(default window)',
+    leaguesOk: results.filter(r => !r.error).length,
+    leaguesTotal: results.length,
+    totalEvents: results.reduce((n, r) => n + r.events.length, 0),
+    inProgress: results.flatMap(r => r.events).filter(e => e.statusType === 'inprogress').length,
+    leagues: results.map(r => ({ slug: r.slug, events: r.events.length, error: r.error || null })),
+  };
+}
+
+// One match's current state. The league's default scoreboard window only spans
+// the current matchday, so a match picked from /day for another date needs that
+// date passed through (&date=YYYY-MM-DD) to be found again on refresh.
+async function getMatch(id, date) {
   const p = (id || '').split(':');           // ['espn', slug, eventId]
   if (p[0] !== 'espn' || !p[1] || !p[2]) throw new Error('bad id');
-  const evs = await fetchLeague(p[1]);
-  return { event: evs.find(e => e.id === id) || null };
+  const ymd = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? date.replace(/-/g, '') : undefined;
+  // Try the requested date, then the league's default window. Both are needed:
+  // the default window only spans the current matchday, and the caller's date is
+  // UTC while ESPN buckets ?dates= by US Eastern, so a late kickoff can sit on
+  // either side of the boundary.
+  let firstError = null;
+  for (const w of (ymd ? [ymd, undefined] : [undefined])) {
+    const r = await fetchLeague(p[1], w);
+    if (r.error) { firstError = firstError || r.error; continue; }
+    const ev = r.events.find(e => e.id === id);
+    if (ev) return { event: ev };
+  }
+  if (firstError) throw new Error(firstError);
+  return { event: null };
 }
 
 // Penalty-shootout kicks per team, made/missed in order, from the summary feed
