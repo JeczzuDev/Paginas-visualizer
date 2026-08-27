@@ -1,0 +1,9 @@
+{
+  "name": "bg-bake-tools",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic seamless-loop video baker for the animated SVG backgrounds",
+  "dependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}

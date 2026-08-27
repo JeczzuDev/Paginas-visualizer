@@ -1,0 +1,3 @@
+# Baked background loops are build output -- regenerate with tools/bake-bg.mjs
+*
+!.gitignore
