@@ -79,28 +79,35 @@ body {
 
 /* ---------------- tabs ---------------- */
 
+/* bottom navigation bar: tabs stretch evenly across the full width */
 .tabs {
     display: flex;
     gap: 6px;
-    padding: 8px 10px 0;
-    overflow-x: auto;
-    background: var(--bg);
+    padding: 8px 10px;
+    background: var(--surface);
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    flex-shrink: 0;
 }
 
 .tab {
+    flex: 1 1 0;
+    min-width: 0;
     border: 0;
-    border-radius: 10px 10px 0 0;
-    padding: 10px 18px;
-    font-size: 14px;
-    background: var(--surface);
+    border-radius: 12px;
+    padding: 16px 8px;
+    font-size: 16px;
+    font-weight: 500;
+    background: var(--surface-2);
     color: var(--text-dim);
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .tab.is-current {
-    background: var(--surface-2);
-    color: var(--text);
-    font-weight: 600;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 700;
 }
 
 /* ---------------- grid ---------------- */
@@ -223,7 +230,7 @@ body {
 .toast {
     position: fixed;
     left: 50%;
-    bottom: calc(18px + env(safe-area-inset-bottom));
+    bottom: calc(90px + env(safe-area-inset-bottom));
     transform: translateX(-50%);
     max-width: 90vw;
     padding: 10px 16px;
