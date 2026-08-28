@@ -4,17 +4,36 @@
  */
 
 import { spawn } from 'node:child_process';
+import { dirname } from 'node:path';
 
-export function launchApp(path: string, args: string[], cwd?: string): Promise<void> {
+export function launchApp(appPath: string, args: string[], cwd?: string): Promise<void> {
+    const lower = appPath.toLowerCase();
+    const isBatch = lower.endsWith('.bat') || lower.endsWith('.cmd');
     return new Promise((resolve, reject) => {
-        const child = spawn(path, args, {
-            cwd,
-            detached: true,
-            stdio: 'ignore',
-            windowsHide: false
-        });
+        let child;
+        if (isBatch) {
+            /* Node 20+ refuses to spawn .bat/.cmd as an image. Open it in its
+             * own console window via cmd `start`; cmd returns immediately and
+             * the batch keeps running detached (good for a server script). */
+            const workdir = cwd || dirname(appPath);
+            const quoted = [`"${appPath}"`, ...args.map((a) => `"${a}"`)].join(' ');
+            const line = `start "" /d "${workdir}" ${quoted}`;
+            child = spawn('cmd', ['/d', '/s', '/c', line], {
+                detached: true,
+                stdio: 'ignore',
+                windowsHide: false,
+                windowsVerbatimArguments: true
+            });
+        } else {
+            child = spawn(appPath, args, {
+                cwd,
+                detached: true,
+                stdio: 'ignore',
+                windowsHide: false
+            });
+        }
         child.once('error', (err) => {
-            reject(new Error(`no se pudo abrir "${path}": ${err.message}`));
+            reject(new Error(`no se pudo abrir "${appPath}": ${err.message}`));
         });
         child.once('spawn', () => {
             child.unref();

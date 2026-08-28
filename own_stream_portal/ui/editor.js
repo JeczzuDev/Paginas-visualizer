@@ -239,7 +239,7 @@ function renderPages() {
     if (!page) return;
     const settings = el('div', { class: 'page-settings' },
         el('div', { class: 'section-title' }, 'Ajustes de la página'),
-        field('Nombre', textInput(page.label, (v) => { page.label = v; markDirty(); renderPages(); })),
+        field('Nombre', textInput(page.label, (v) => { page.label = v; markDirty(); renderButtons(); }, '', () => renderPages())),
         el('div', { class: 'row' },
             field('Columnas', numInput(page.grid.cols, 1, 10, (v) => { page.grid.cols = v; markDirty(); renderButtons(); })),
             field('Filas', numInput(page.grid.rows, 1, 12, (v) => { page.grid.rows = v; markDirty(); renderButtons(); }))
@@ -481,7 +481,6 @@ function renderActionEditor(action, onReplace, { allowMacro }) {
 
 function renderActionFields(action) {
     const box = el('div', {});
-    const reRenderEditor = () => renderEditor();
 
     switch (action.type) {
         case 'obs.scene':
@@ -490,21 +489,27 @@ function renderActionFields(action) {
 
         case 'obs.sourceVisibility': {
             const sources = obs.sceneSources[action.scene] || allSources();
-            box.append(field('Escena', comboInput(action.scene, obs.scenes, (v) => { action.scene = v; markDirty(); reRenderEditor(); })));
-            box.append(field('Fuente', comboInput(action.source, sources, (v) => { action.source = v; markDirty(); renderButtons(); })));
+            /* build the source combo first so the scene field can refresh its
+             * suggestions in place (no re-render → the input keeps focus) */
+            const srcCombo = comboInput(action.source, sources, (v) => { action.source = v; markDirty(); renderButtons(); });
+            box.append(field('Escena', comboInput(action.scene, obs.scenes, (v) => {
+                action.scene = v; markDirty(); renderButtons();
+                updateDatalist(srcCombo, obs.sceneSources[v] || allSources());
+            })));
+            box.append(field('Fuente', srcCombo));
             box.append(field('Visibilidad', triSelect(action.visible, ['Alternar', 'Mostrar', 'Ocultar'], (v) => { action.visible = v; markDirty(); })));
             break;
         }
 
         case 'obs.filter': {
-            const filters = filtersCache[action.source] || [];
-            box.append(field('Fuente', comboInput(action.source, allSources(), (v) => {
-                action.source = v; markDirty();
-                loadFilters(v).then(reRenderEditor);
-            })));
-            box.append(field('Filtro', comboInput(action.filter, filters, (v) => { action.filter = v; markDirty(); renderButtons(); })));
+            const filterCombo = comboInput(action.filter, filtersCache[action.source] || [], (v) => { action.filter = v; markDirty(); renderButtons(); });
+            box.append(field('Fuente', comboInput(action.source, allSources(),
+                (v) => { action.source = v; markDirty(); },
+                (v) => loadFilters(v).then(() => updateDatalist(filterCombo, filtersCache[v]))
+            )));
+            box.append(field('Filtro', filterCombo));
             box.append(field('Estado', triSelect(action.enabled, ['Alternar', 'Activar', 'Desactivar'], (v) => { action.enabled = v; markDirty(); })));
-            if (action.source && !filtersCache[action.source]) loadFilters(action.source).then(reRenderEditor);
+            if (action.source && !filtersCache[action.source]) loadFilters(action.source).then(() => updateDatalist(filterCombo, filtersCache[action.source]));
             break;
         }
 
@@ -544,11 +549,13 @@ function renderActionFields(action) {
             break;
 
         case 'launch.app':
-            box.append(field('Ruta del programa', textInput(action.path, (v) => { action.path = v; markDirty(); renderButtons(); }, 'ej: notepad.exe')));
+            box.append(field('Ruta del programa (.exe, .bat, .cmd)', textInput(action.path, (v) => { action.path = v; markDirty(); renderButtons(); }, 'ej: notepad.exe o D:\\...\\start-server.bat')));
+            box.append(field('Carpeta de trabajo (opcional)', textInput(action.cwd || '', (v) => { action.cwd = v || undefined; markDirty(); }, 'ej: D:\\Program Files\\obs-studio\\bin\\64bit')));
             box.append(field('Argumentos (separados por espacio)', textInput((action.args || []).join(' '), (v) => {
                 action.args = v.trim() ? v.trim().split(/\s+/) : [];
                 markDirty();
             })));
+            box.append(el('p', { class: 'hint' }, 'Para OBS: la ruta a obs64.exe y su carpeta bin\\64bit como carpeta de trabajo.'));
             break;
 
         case 'launch.url':
@@ -696,7 +703,7 @@ function togglePresetHelper(macro, box) {
     const rebuild = () => {
         helper.innerHTML = '';
         helper.append(el('div', { class: 'card-head' }, el('span', { class: 't' }, 'Preset de fondo')));
-        helper.append(field('Escena', comboInput(scene, obs.scenes, (v) => { scene = v; rebuild(); })));
+        helper.append(field('Escena', comboInput(scene, obs.scenes, (v) => { scene = v; }, () => rebuild())));
         const sources = obs.sceneSources[scene] || [];
         if (!sources.length) {
             helper.append(el('p', { class: 'hint' }, 'Sin fuentes conocidas para esta escena (¿OBS conectado?).'));
@@ -742,9 +749,13 @@ function field(labelText, control) {
     return el('label', { class: 'field' }, el('span', {}, labelText), control);
 }
 
-function textInput(value, onChange, placeholder) {
+/* onChange fires per keystroke (model + light preview); optional onCommit
+ * fires on blur/enter ('change') — use it for anything that re-renders the
+ * editor, so typing never destroys the focused input. */
+function textInput(value, onChange, placeholder, onCommit) {
     const inp = el('input', { type: 'text', value: value ?? '', placeholder: placeholder || '' });
     inp.addEventListener('input', () => onChange(inp.value));
+    if (onCommit) inp.addEventListener('change', () => onCommit(inp.value));
     return inp;
 }
 
@@ -770,15 +781,25 @@ function triSelect(value, [tog, yes, no], onChange) {
     return sel;
 }
 
-/* text input with datalist suggestions (free-typeable) */
-function comboInput(value, suggestions, onChange) {
+/* text input with datalist suggestions (free-typeable). onChange fires per
+ * keystroke; optional onCommit fires on 'change' (blur/pick). */
+function comboInput(value, suggestions, onChange, onCommit) {
     const listId = uid('dl');
     const inp = el('input', { type: 'text', value: value ?? '', list: listId, placeholder: 'escribe o elige…' });
     const dl = el('datalist', { id: listId }, (suggestions || []).map((s) => el('option', { value: s })));
     inp.addEventListener('input', () => onChange(inp.value));
+    if (onCommit) inp.addEventListener('change', () => onCommit(inp.value));
     const wrap = el('div', {});
     wrap.append(inp, dl);
     return wrap;
+}
+
+/* swap a combo's suggestion list in place, without re-rendering (keeps focus) */
+function updateDatalist(comboWrap, options) {
+    const dl = comboWrap.querySelector('datalist');
+    if (!dl) return;
+    dl.innerHTML = '';
+    for (const s of options || []) dl.append(el('option', { value: s }));
 }
 
 /* ------------------------------------------------------------------ */
