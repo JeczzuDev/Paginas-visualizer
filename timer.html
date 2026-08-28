@@ -1,92 +1,1877 @@
 <!DOCTYPE html>
+<!--
+=====================================================================
+  Timer / Cronómetro  —  single-file OBS browser source
+=====================================================================
+  One self-contained file, three views (selected by URL):
+
+    timer.html                  -> INLINE (the default): overlay on top,
+                                   operator panel underneath, both in ONE
+                                   document. Add this as the OBS Browser
+                                   Source and crop the panel away — the
+                                   same trick the scoreboard uses. Nothing
+                                   can go out of sync because there is no
+                                   second document involved.
+    timer.html?panel=off        -> DISPLAY only: the bare overlay, fully
+                                   transparent, nothing to crop.
+    timer.html?control=1        -> PANEL only (operator UI; put it in
+                                   Docks > Custom Browser Docks, or open
+                                   it in a second browser window)
+
+  The overlay occupies the top 60% of the page in inline mode; ?stageh=75
+  changes that share if you need a taller or shorter crop.
+
+  THREE MODES (state.mode)
+    down    countdown from a duration            (15:00 -> 00:00)
+    up      chronometer, counts up from 00:00
+    target  countdown to a wall-clock hour       (21:30 today, or the
+            next occurrence; optional explicit date)
+
+  WHY THE CLOCK IS TIMESTAMP-BASED
+    State stores { running, since, base } — never a per-second counter.
+    Every tick recomputes from Date.now(), so an OBS refresh, a scene
+    switch, or "Refresh browser when scene becomes active" resumes at
+    the right time instead of restarting, and two windows always agree.
+
+  SYNC (no server)
+    State lives in localStorage under 'timer_state_<id>' and travels by
+    three paths: BroadcastChannel, the 'storage' event, and a 400 ms
+    poll. Under file:// URLs, CEF often hands each document an opaque
+    origin — BroadcastChannel can throw and storage may not be shared —
+    so the poll is the one that actually carries this setup, and the
+    panel shows a live heartbeat badge telling you whether the display
+    is really listening. This only matters when you split them apart
+    (?panel=off in OBS + ?control=1 in a dock) — the default inline view
+    keeps both in one document, where syncing cannot fail at all.
+
+  MULTIPLE TIMERS
+    ?id=main (default) namespaces the state. timer.html?id=b is a second,
+    fully independent timer with its own panel.
+
+  URL PARAMETERS (applied on load, then persisted so the panel sees them)
+    id, control, panel, stageh, mode, duration, at, date, autostart,
+    format, tenths, color, font, size, weight, letter, label, labelpos,
+    labelsize, end, endtext, hold, fade, box, boxcolor, boxalpha
+
+    timer.html?mode=down&duration=15:00&autostart=1&size=160
+    timer.html?mode=target&at=21:30&label=EMPEZAMOS%20EN
+    timer.html?mode=up&autostart=1&id=b
+    timer.html?panel=off            (bare overlay, no panel to crop)
+
+    autostart=1 resets and starts on load: combined with the Browser
+    Source option "Refresh browser when scene becomes active", entering
+    the scene begins a fresh countdown with zero clicks.
+
+    NOTE: to pass parameters in OBS you must UNCHECK "Local file" and
+    type the URL by hand:  file:///D:/.../timer.html?mode=up&autostart=1
+
+  OBS NOTES
+    * No <input type=color> anywhere: its native picker is invisible
+      inside OBS, so colors use the in-page modal (same fix as
+      scoreboard-apifootball.html).
+    * No <select> either — native dropdowns are unreliable through
+      "Interact". Everything is buttons, text, numbers and sliders.
+    * Fonts are the ones installed in Windows: nothing is fetched from
+      the network, so the overlay renders identically with OBS offline.
+      A font you type that is not installed is flagged in the panel
+      instead of silently falling back mid-stream.
+    * FONT NAMES DIFFER FROM OBS. A font file carries two family names:
+      OBS's font dialog shows the legacy Win32/GDI one ("Pricedown Bl"),
+      browsers match the typographic one ("Pricedown"). Type either —
+      the page puts both in the CSS stack and the panel reports which
+      name actually rendered. Any family that works is remembered and
+      listed in the picker from then on.
+-->
 <html lang="es">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Timer Centrado</title>
-    <link rel="stylesheet" href="style.css">
+    <title>Timer · OBS</title>
+    <style>
+        /* ===== base ===================================================== */
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            background: transparent;
+            /* OBS composites the alpha — never paint a background here */
+            overflow: hidden;
+        }
+
+        /* ===== display =================================================== */
+        #stage {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+        }
+
+        .stage-inner {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: var(--t-label-gap, 8px);
+            padding: var(--t-box-pad, 0px);
+            background: var(--t-box-bg, transparent);
+            border-radius: var(--t-box-radius, 0px);
+            transition: opacity 80ms linear;
+        }
+
+        .timer {
+            font-family: var(--t-font, 'Bahnschrift', 'Segoe UI', sans-serif);
+            font-size: var(--t-size, 140px);
+            font-weight: var(--t-weight, 700);
+            letter-spacing: var(--t-letter, 0px);
+            color: var(--t-color, #fff);
+            line-height: 1;
+            white-space: nowrap;
+            text-shadow: var(--t-shadow, none);
+            -webkit-text-stroke: var(--t-stroke, 0);
+            paint-order: stroke fill;
+            /* outline behind the glyph, not over it */
+            font-variant-numeric: tabular-nums;
+            font-feature-settings: 'tnum' 1;
+        }
+
+        /* Fixed-width digit cells: most Windows display fonts have no 'tnum'
+           table, and without this the timer visibly wobbles every second. */
+        .timer .d {
+            display: inline-block;
+            width: var(--digit-w, .62em);
+            text-align: center;
+        }
+
+        .label {
+            font-family: var(--t-font, 'Bahnschrift', 'Segoe UI', sans-serif);
+            font-size: var(--t-label-size, 40px);
+            font-weight: var(--t-weight, 700);
+            letter-spacing: var(--t-letter, 0px);
+            color: var(--t-label-color, #fff);
+            line-height: 1.1;
+            white-space: nowrap;
+            text-shadow: var(--t-shadow, none);
+            -webkit-text-stroke: var(--t-stroke, 0);
+            paint-order: stroke fill;
+        }
+
+        .label:empty {
+            display: none;
+        }
+
+        .label-above {
+            order: -1;
+        }
+
+        /* ===== view switching ============================================ */
+        /* Hidden by default, revealed only for the panel views: data-view is set by
+           script, and an overlay must never flash the operator UI while it boots. */
+        #control {
+            display: none;
+        }
+
+        body[data-view="control"] #control,
+        body[data-view="inline"] #control {
+            display: block;
+        }
+
+        body[data-view="inline"] {
+            display: flex;
+            flex-direction: column;
+        }
+
+        body[data-view="inline"] #stage {
+            position: relative;
+            inset: auto;
+            flex: none;
+            height: var(--stage-h, 60vh);
+            width: 100%;
+        }
+
+        body[data-view="inline"] #control {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+        }
+
+        /* Inline mode already shows the real overlay directly above the panel, so a
+           preview of it would be a second, redundant copy — and the heartbeat that
+           lives in that section is meaningless when both live in one document. */
+        body[data-view="inline"] [data-preview-sec] {
+            display: none;
+        }
+
+        /* Control view scrolls the document itself (see the boot code, which lifts
+           the overflow:hidden above) so the panel works in a narrow OBS dock. */
+        body[data-view="control"] {
+            background: #0b0d18;
+        }
+
+        body[data-view="control"] #stage {
+            position: relative;
+            inset: auto;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* ===== panel ===================================================== */
+        #control {
+            background: #0e1020;
+            color: #e9ecf5;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-size: 14px;
+            padding: 10px;
+            border-top: 2px solid #2a2f4d;
+        }
+
+        .ctl-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: 780px;
+            margin: 0 auto;
+        }
+
+        .sec {
+            background: #151834;
+            border: 1px solid #2a2f4d;
+            border-radius: 10px;
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .sec-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-weight: 700;
+            font-size: 12px;
+            letter-spacing: .09em;
+            text-transform: uppercase;
+            color: #8f9ad4;
+        }
+
+        .row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .row.big button {
+            flex: 1 1 140px;
+            font-size: 18px;
+            padding: 14px 16px;
+        }
+
+        .lbl {
+            color: #98a0c8;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: .05em;
+        }
+
+        .unit {
+            color: #6f78a3;
+            font-size: 12px;
+        }
+
+        .hint {
+            color: #7f88b5;
+            font-size: 12px;
+            line-height: 1.45;
+        }
+
+        .hint.inline {
+            font-size: 12px;
+        }
+
+        .warn {
+            color: #ffb020;
+            font-size: 12px;
+        }
+
+        .fstatus {
+            font-size: 12px;
+        }
+
+        .fstatus.ok {
+            color: #4ee08a;
+        }
+
+        .fstatus.alt {
+            color: #ffb020;
+        }
+
+        .fstatus.bad {
+            color: #ff8a6a;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        button {
+            font: inherit;
+            color: #e9ecf5;
+            background: #23284d;
+            border: 1px solid #39406e;
+            border-radius: 8px;
+            padding: 9px 12px;
+            cursor: pointer;
+            min-height: 40px;
+        }
+
+        button:hover {
+            background: #2d3363;
+        }
+
+        button:active {
+            transform: translateY(1px);
+        }
+
+        .btn.sm {
+            padding: 7px 10px;
+            min-height: 34px;
+            font-size: 13px;
+        }
+
+        .btn.go {
+            background: #0f7b3f;
+            border-color: #17a557;
+        }
+
+        .btn.go:hover {
+            background: #14994e;
+        }
+
+        .btn.stop {
+            background: #8c2a24;
+            border-color: #c23b32;
+        }
+
+        .btn.stop:hover {
+            background: #a83029;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        textarea {
+            font: inherit;
+            color: #e9ecf5;
+            background: #0b0d1c;
+            border: 1px solid #39406e;
+            border-radius: 8px;
+            padding: 8px 10px;
+            min-height: 38px;
+        }
+
+        textarea {
+            width: 100%;
+            font-family: Consolas, monospace;
+            font-size: 12px;
+        }
+
+        input[type="range"] {
+            flex: 1 1 110px;
+            min-width: 90px;
+            accent-color: #5b6bff;
+        }
+
+        .chk {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .chk input {
+            width: 18px;
+            height: 18px;
+            accent-color: #5b6bff;
+        }
+
+        /* segmented button group (replaces <select>, which is unreliable in OBS) */
+        .seg {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .seg button {
+            background: #1b1f3d;
+            border-color: #333a66;
+            font-size: 13px;
+            padding: 8px 12px;
+        }
+
+        .seg button.on {
+            background: #3d49b8;
+            border-color: #6b78ff;
+            font-weight: 700;
+        }
+
+        .seg.sm button {
+            padding: 6px 10px;
+            min-height: 32px;
+            font-size: 12px;
+        }
+
+        .swatch {
+            width: 46px;
+            height: 30px;
+            min-height: 30px;
+            border-radius: 6px;
+            border: 2px solid #4b5290;
+            padding: 0;
+        }
+
+        /* preview: checkerboard makes the transparency visible */
+        .preview-frame {
+            position: relative;
+            height: 190px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid #2a2f4d;
+            background-color: #12152b;
+            background-image:
+                linear-gradient(45deg, #1c2039 25%, transparent 25%),
+                linear-gradient(-45deg, #1c2039 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #1c2039 75%),
+                linear-gradient(-45deg, transparent 75%, #1c2039 75%);
+            background-size: 18px 18px;
+            background-position: 0 0, 0 9px, 9px -9px, -9px 0;
+        }
+
+        .hb {
+            font-size: 12px;
+            letter-spacing: 0;
+            text-transform: none;
+        }
+
+        .hb.ok {
+            color: #4ee08a;
+        }
+
+        .hb.bad {
+            color: #ff8a6a;
+        }
+
+        .hb.idle {
+            color: #ffb020;
+        }
+
+        .preset-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #1b1f3d;
+            border: 1px solid #333a66;
+            border-radius: 999px;
+            padding: 4px 6px 4px 12px;
+        }
+
+        .preset-chip button {
+            min-height: 26px;
+            padding: 2px 8px;
+            font-size: 12px;
+            border-radius: 999px;
+        }
+
+        /* ===== modals (color / fonts) ==================================== */
+        .modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(4, 6, 16, .72);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+            padding: 16px;
+        }
+
+        .modal-card {
+            background: #151834;
+            border: 1px solid #39406e;
+            border-radius: 12px;
+            width: min(420px, 96vw);
+            max-height: 88vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            color: #e9ecf5;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+        }
+
+        .modal-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 14px;
+            border-bottom: 1px solid #2a2f4d;
+            font-weight: 700;
+        }
+
+        .modal-body {
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            overflow-y: auto;
+        }
+
+        .color-preview {
+            width: 60px;
+            height: 38px;
+            border-radius: 8px;
+            border: 2px solid #4b5290;
+        }
+
+        .color-sliders {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .color-sliders label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #98a0c8;
+            font-size: 12px;
+        }
+
+        .color-palette {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            gap: 6px;
+        }
+
+        .pal {
+            height: 30px;
+            min-height: 30px;
+            border-radius: 6px;
+            border: 1px solid #00000055;
+            padding: 0;
+        }
+
+        .font-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .font-item {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 10px;
+            text-align: left;
+            font-size: 20px;
+            padding: 8px 12px;
+        }
+
+        .font-item small {
+            font-family: 'Segoe UI', sans-serif;
+            font-size: 11px;
+            color: #7f88b5;
+            flex: none;
+        }
+
+        .font-item.off {
+            opacity: .45;
+        }
+    </style>
 </head>
 
 <body>
-    <div class="timer-container">
-        <div id="timer" class="timer-text">00:00</div>
+    <!-- ===== DISPLAY (this is what OBS shows) ===== -->
+    <div id="stage">
+        <div class="stage-inner" data-inner>
+            <div class="label label-above" data-label-above></div>
+            <div class="timer" data-timer>15:00</div>
+            <div class="label label-below" data-label-below></div>
+        </div>
     </div>
 
-    <script src="script.js"></script>
+    <!-- ===== OPERATOR PANEL ===== -->
+    <div id="control">
+        <div class="ctl-wrap">
+
+            <div class="sec" data-preview-sec>
+                <div class="sec-head"><span>Vista previa</span><span class="hb" data-hb></span></div>
+                <div class="preview-frame" data-preview-frame></div>
+                <div class="hint" data-hb-hint></div>
+            </div>
+
+            <div class="sec">
+                <div class="sec-head">Transporte</div>
+                <div class="row big">
+                    <button class="btn go" data-toggle>▶ Iniciar</button>
+                    <button class="btn" data-reset>⟲ Reset</button>
+                </div>
+                <div class="row">
+                    <button class="btn sm" data-adj="-60">−1 m</button>
+                    <button class="btn sm" data-adj="-10">−10 s</button>
+                    <button class="btn sm" data-adj="10">+10 s</button>
+                    <button class="btn sm" data-adj="60">+1 m</button>
+                    <span class="lbl">Rápido</span>
+                    <button class="btn sm" data-quick="5">5</button>
+                    <button class="btn sm" data-quick="10">10</button>
+                    <button class="btn sm" data-quick="15">15</button>
+                    <button class="btn sm" data-quick="30">30</button>
+                    <button class="btn sm" data-quick="60">60</button>
+                </div>
+                <div class="hint" data-transport-hint>Espacio = iniciar/pausar · R = reset</div>
+            </div>
+
+            <div class="sec">
+                <div class="sec-head">Modo</div>
+                <div class="seg" data-seg="mode">
+                    <button data-val="down">Cuenta atrás</button>
+                    <button data-val="up">Cronómetro</button>
+                    <button data-val="target">Hora objetivo</button>
+                </div>
+                <div class="row" data-when="down">
+                    <span class="lbl">Duración</span>
+                    <input type="text" data-duration placeholder="MM:SS o HH:MM:SS" style="width:150px">
+                    <span class="hint inline" data-duration-echo></span>
+                </div>
+                <div class="row" data-when="target">
+                    <span class="lbl">Hora</span>
+                    <input type="text" data-target-time placeholder="21:30" style="width:100px">
+                    <span class="lbl">Fecha</span>
+                    <input type="text" data-target-date placeholder="AAAA-MM-DD (opcional)" style="width:190px">
+                    <button class="btn sm" data-date-clear>Sin fecha</button>
+                </div>
+                <div class="hint" data-target-echo data-when="target"></div>
+                <div class="hint" data-when="up">El cronómetro cuenta hacia arriba desde 00:00. Pausar conserva
+                    lo acumulado; Reset vuelve a cero.</div>
+            </div>
+
+            <div class="sec">
+                <div class="sec-head">Formato</div>
+                <div class="row">
+                    <div class="seg sm" data-seg="format.unit">
+                        <button data-val="auto">Auto</button>
+                        <button data-val="ms">MM:SS</button>
+                        <button data-val="hms">HH:MM:SS</button>
+                    </div>
+                </div>
+                <div class="row">
+                    <label class="chk"><input type="checkbox" data-tenths> Décimas</label>
+                    <label class="chk"><input type="checkbox" data-fixed> Dígitos de ancho fijo</label>
+                </div>
+            </div>
+
+            <div class="sec">
+                <div class="sec-head">Al llegar a cero</div>
+                <div class="seg sm" data-seg="end.action">
+                    <button data-val="message-then-hide">Mensaje y ocultar</button>
+                    <button data-val="message">Mensaje fijo</button>
+                    <button data-val="freeze">Congelar 00:00</button>
+                    <button data-val="overtime">Tiempo extra</button>
+                    <button data-val="hide">Ocultar</button>
+                </div>
+                <div class="row">
+                    <span class="lbl">Mensaje</span>
+                    <input type="text" data-end-text style="width:220px">
+                </div>
+                <div class="row">
+                    <span class="lbl">Mantener</span><input type="number" data-end-hold min="0" max="3600"
+                        style="width:80px"><span class="unit">s</span>
+                    <span class="lbl">Fundido</span><input type="number" data-end-fade min="0" max="20000" step="100"
+                        style="width:90px"><span class="unit">ms</span>
+                    <span class="lbl">Color extra</span><button class="swatch" data-sw="end.overtimeColor"></button>
+                </div>
+            </div>
+
+            <div class="sec">
+                <div class="sec-head">Tipografía</div>
+                <div class="row">
+                    <span class="lbl">Fuente</span>
+                    <input type="text" data-font style="width:200px">
+                    <button class="btn sm" data-font-open>Fuentes…</button>
+                    <span class="fstatus" data-font-status></span>
+                </div>
+                <div class="row">
+                    <span class="lbl">Grosor</span>
+                    <div class="seg sm" data-seg="look.weight">
+                        <button data-val="400">400</button>
+                        <button data-val="600">600</button>
+                        <button data-val="700">700</button>
+                        <button data-val="800">800</button>
+                        <button data-val="900">900</button>
+                    </div>
+                </div>
+                <div class="row">
+                    <span class="lbl">Tamaño</span>
+                    <input type="range" min="20" max="480" step="2" data-size>
+                    <input type="number" min="10" max="900" data-size-n style="width:86px"><span class="unit">px</span>
+                </div>
+                <div class="row">
+                    <span class="lbl">Espaciado</span>
+                    <input type="range" min="-20" max="60" data-letter><span class="unit" data-letter-echo></span>
+                    <span class="lbl">Color</span><button class="swatch" data-sw="look.color"></button>
+                </div>
+                <div class="row">
+                    <label class="chk"><input type="checkbox" data-stroke-on> Contorno</label>
+                    <input type="range" min="0" max="30" data-stroke-w><span class="unit" data-stroke-echo></span>
+                    <button class="swatch" data-sw="look.stroke.color"></button>
+                </div>
+                <div class="row">
+                    <label class="chk"><input type="checkbox" data-shadow-on> Sombra</label>
+                    <input type="range" min="0" max="80" data-shadow-blur>
+                    <span class="lbl">X</span><input type="number" data-shadow-x style="width:70px">
+                    <span class="lbl">Y</span><input type="number" data-shadow-y style="width:70px">
+                    <button class="swatch" data-sw="look.shadow.color"></button>
+                </div>
+            </div>
+
+            <div class="sec">
+                <div class="sec-head">Caja de fondo</div>
+                <label class="chk"><input type="checkbox" data-box-on> Activar (por defecto: sin fondo,
+                    transparente)</label>
+                <div class="row">
+                    <span class="lbl">Color</span><button class="swatch" data-sw="look.box.color"></button>
+                    <span class="lbl">Opacidad</span><input type="range" min="0" max="100" data-box-alpha><span
+                        class="unit" data-box-alpha-echo></span>
+                </div>
+                <div class="row">
+                    <span class="lbl">Relleno</span><input type="range" min="0" max="200" data-box-pad>
+                    <span class="lbl">Esquinas</span><input type="range" min="0" max="240" data-box-radius>
+                </div>
+            </div>
+
+            <div class="sec">
+                <div class="sec-head">Etiqueta</div>
+                <div class="row">
+                    <input type="text" data-label-text placeholder="p. ej. EMPEZAMOS EN" style="width:260px">
+                </div>
+                <div class="row">
+                    <div class="seg sm" data-seg="look.label.pos">
+                        <button data-val="above">Arriba</button>
+                        <button data-val="below">Abajo</button>
+                    </div>
+                    <span class="lbl">Tamaño</span><input type="range" min="10" max="220" data-label-size>
+                    <span class="lbl">Color</span><button class="swatch" data-sw="look.label.color"></button>
+                </div>
+            </div>
+
+            <div class="sec">
+                <div class="sec-head">Presets</div>
+                <div class="row">
+                    <input type="text" data-preset-name placeholder="nombre del preset" style="width:200px">
+                    <button class="btn sm" data-preset-save>Guardar aspecto</button>
+                </div>
+                <div class="row" data-preset-list></div>
+                <div class="row">
+                    <button class="btn sm" data-preset-export>Exportar</button>
+                    <button class="btn sm" data-preset-import>Importar</button>
+                </div>
+                <textarea class="hidden" data-preset-json rows="5"
+                    placeholder="pega aquí el JSON y pulsa Importar"></textarea>
+            </div>
+
+            <div class="sec">
+                <div class="sec-head">Sincronía y OBS</div>
+                <div class="hint" data-sync-info></div>
+                <div class="row">
+                    <input type="text" data-display-url readonly style="flex:1 1 260px">
+                    <button class="btn sm" data-copy-url>Copiar</button>
+                </div>
+                <div class="hint">URL del overlay limpio (sin panel). Para usarla en OBS hay que
+                    <b>desmarcar «Archivo local»</b> y pegarla en el campo URL: con la casilla
+                    marcada OBS no admite parámetros.
+                </div>
+                <div class="row">
+                    <button class="btn sm" data-open-inline>Abrir solo el display</button>
+                    <button class="btn sm stop" data-reset-all>Restablecer todo</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Color picker (native <input type=color> is invisible in OBS) ===== -->
+    <div class="modal hidden" data-color-modal>
+        <div class="modal-card">
+            <div class="modal-head">
+                <span data-color-title>Color</span>
+                <button class="btn sm" data-color-close>✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="color-preview" data-color-preview></div>
+                    <input type="text" data-color-hex maxlength="7" placeholder="#RRGGBB" style="width:130px">
+                </div>
+                <div class="color-sliders">
+                    <label>R <input type="range" min="0" max="255" data-rgb-r></label>
+                    <label>G <input type="range" min="0" max="255" data-rgb-g></label>
+                    <label>B <input type="range" min="0" max="255" data-rgb-b></label>
+                </div>
+                <div class="color-palette" data-color-palette></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Font picker (only fonts installed on this PC) ===== -->
+    <div class="modal hidden" data-font-modal>
+        <div class="modal-card">
+            <div class="modal-head">
+                <span>Fuentes instaladas</span>
+                <button class="btn sm" data-font-close>✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <input type="text" data-font-search placeholder="buscar…" style="flex:1 1 140px">
+                    <button class="btn sm" data-font-detect>Detectar las del PC</button>
+                </div>
+                <div class="hint" data-font-msg>Se comprueba cuál está realmente instalada en este PC.
+                    Las marcadas <b>no instalada</b> se verían con otra tipografía en el directo.
+                </div>
+                <div class="font-list" data-font-list></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        'use strict';
+
+        /* ================================================================
+           Config & view
+           ================================================================ */
+        const PARAMS = new URLSearchParams(location.search);
+        const ID = (PARAMS.get('id') || 'main').replace(/[^\w-]/g, '') || 'main';
+        const KEY = 'timer_state_' + ID;      // shared state
+        const HB_KEY = 'timer_hb_' + ID;         // display heartbeat
+        const CH_NAME = 'timer_ch_' + ID;         // BroadcastChannel name
+        const PRESET_KEY = 'timer_presets';           // shared by every id
+        const FONTS_KEY = 'timer_fonts_extra';       // font families found on this PC
+        const POLL_MS = 400;                        // localStorage poll (file:// lifeline)
+        const HB_MS = 2000;                       // heartbeat write interval
+
+        // Inline is the default: opening the file plainly gives you the overlay with
+        // its controls underneath (crop them out in OBS). ?panel=off strips it down
+        // to the bare overlay; ?control=1 gives the panel on its own.
+        const PANEL_OFF = ['off', '0', 'no', 'none', 'false', 'hide']
+            .includes((PARAMS.get('panel') || '').toLowerCase());
+        const VIEW = PARAMS.has('control') ? 'control' : (PANEL_OFF ? 'display' : 'inline');
+        document.body.dataset.view = VIEW;
+        const IS_PANEL = VIEW !== 'display';
+        const IS_DISPLAY = VIEW !== 'control';
+
+        // The overlay must never scroll (overflow:hidden in the CSS), but the panel
+        // must — it is taller than an OBS dock. Lift the clamp for the control view.
+        if (VIEW === 'control') {
+            document.documentElement.style.overflow = 'auto';
+            document.body.style.overflow = 'visible';
+            document.body.style.height = 'auto';
+            document.body.style.minHeight = '100%';
+        }
+
+        if (PARAMS.get('stageh')) {
+            document.documentElement.style.setProperty('--stage-h', parseFloat(PARAMS.get('stageh')) + 'vh');
+        }
+
+        const $ = (sel, root = document) => root.querySelector(sel);
+        const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+        /* ================================================================
+           State
+           ================================================================ */
+        function defaultState() {
+            return {
+                mode: 'down',                                  // 'down' | 'up' | 'target'
+                // Timestamp-based, exactly like the scoreboard's clock: no per-second
+                // writes, and any reload recomputes the same value from Date.now().
+                run: { running: false, since: 0, base: 0 },     // base in ms
+                duration: 900,                                 // seconds, for 'down'
+                target: { time: '21:30', date: '' },            // '' date = next occurrence
+                end: {
+                    action: 'message-then-hide',               // freeze|message|message-then-hide|hide|overtime
+                    text: '¡EMPEZAMOS!',
+                    holdSec: 5,
+                    fadeMs: 800,
+                    overtimeColor: '#FF3B01'
+                },
+                format: { unit: 'auto', tenths: false, fixedDigits: true },
+                look: {
+                    font: 'Bahnschrift', weight: 700, size: 140, letter: 0,
+                    color: '#FFFFFF',
+                    stroke: { on: true, color: '#000000', width: 4 },
+                    shadow: { on: true, color: '#000000', blur: 12, x: 0, y: 4 },
+                    box: { on: false, color: '#000000', alpha: 0.55, pad: 24, radius: 18 },
+                    label: { text: '', pos: 'above', size: 40, color: '#FFFFFF', gap: 8 }
+                },
+                rev: 0
+            };
+        }
+
+        // Deep merge so a state saved by an older version still boots with every
+        // field present (a missing look.box would otherwise throw on render).
+        function merge(base, over) {
+            if (!over || typeof over !== 'object') return base;
+            const out = Array.isArray(base) ? base.slice() : Object.assign({}, base);
+            for (const k of Object.keys(over)) {
+                const b = out[k], o = over[k];
+                out[k] = (b && o && typeof b === 'object' && typeof o === 'object' && !Array.isArray(b))
+                    ? merge(b, o) : o;
+            }
+            return out;
+        }
+
+        function loadState() {
+            try {
+                const raw = localStorage.getItem(KEY);
+                if (raw) return merge(defaultState(), JSON.parse(raw));
+            } catch (e) { /* opaque origin or bad JSON — fall through to defaults */ }
+            return defaultState();
+        }
+
+        let state = loadState();
+
+        // BroadcastChannel throws on opaque file:// origins in some CEF builds.
+        let channel = null;
+        try { channel = ('BroadcastChannel' in window) ? new BroadcastChannel(CH_NAME) : null; }
+        catch (e) { channel = null; }
+
+        function saveState() {
+            // Monotonic: two edits inside the same millisecond must still differ,
+            // otherwise the other window would ignore the second one.
+            state.rev = Math.max(Date.now(), (state.rev || 0) + 1);
+            const json = JSON.stringify(state);
+            try { localStorage.setItem(KEY, json); } catch (e) { /* ignore */ }
+            try { if (channel) channel.postMessage(json); } catch (e) { /* ignore */ }
+            applyLook();
+            if (IS_PANEL) syncPanel();
+            tick();
+        }
+
+        function applyIncoming(json) {
+            try {
+                const next = JSON.parse(json);
+                if (next && next.rev !== state.rev) {
+                    state = merge(defaultState(), next);
+                    applyLook();
+                    if (IS_PANEL) syncPanel();
+                    tick();
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        // Three sync paths so this works in a browser AND inside OBS CEF.
+        if (channel) channel.onmessage = (e) => applyIncoming(e.data);
+        window.addEventListener('storage', (e) => {
+            if (e.key === KEY && e.newValue) applyIncoming(e.newValue);
+        });
+        setInterval(() => {
+            try {
+                const raw = localStorage.getItem(KEY);
+                if (raw) applyIncoming(raw);
+            } catch (e) { /* ignore */ }
+        }, POLL_MS);
+
+        /* ---- path helpers (used by the color modal and the segmented groups) ---- */
+        function getPath(p) { return p.split('.').reduce((o, k) => (o == null ? o : o[k]), state); }
+        function setPath(p, v) {
+            const parts = p.split('.'); const last = parts.pop();
+            const obj = parts.reduce((o, k) => o[k], state);
+            obj[last] = v;
+        }
+
+        /* ================================================================
+           Time maths — every value derives from Date.now()
+           ================================================================ */
+        function accumulatedMs() {
+            const r = state.run;
+            return Math.max(0, r.base + (r.running ? (Date.now() - r.since) : 0));
+        }
+
+        function parseDateStr(s) {
+            const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec((s || '').trim());
+            if (!m) return null;
+            const d = new Date(+m[1], +m[2] - 1, +m[3]);
+            return isNaN(d) ? null : d;
+        }
+
+        // 'HH:MM' (or 'HH:MM:SS') resolved against local time. With no date, an hour
+        // that already passed today rolls to tomorrow — otherwise setting 21:30 at
+        // 22:00 would silently sit at 00:00 forever.
+        function targetEpoch() {
+            const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec((state.target.time || '').trim());
+            if (!m) return null;
+            const day = state.target.date ? parseDateStr(state.target.date) : new Date();
+            if (!day) return null;
+            const dt = new Date(day.getFullYear(), day.getMonth(), day.getDate(),
+                Math.min(23, +m[1]), Math.min(59, +m[2]), m[3] ? Math.min(59, +m[3]) : 0, 0);
+            if (!state.target.date && dt.getTime() <= Date.now()) dt.setDate(dt.getDate() + 1);
+            return dt.getTime();
+        }
+
+        // Signed milliseconds still to go. Negative = past zero.
+        // 'up' has no end, so it reports its elapsed time instead (see isCountdown).
+        function isCountdown() { return state.mode === 'down' || state.mode === 'target'; }
+
+        function remainingMs() {
+            if (state.mode === 'down') return state.duration * 1000 - accumulatedMs();
+            if (state.mode === 'target') {
+                const t = targetEpoch();
+                return t == null ? 0 : t - Date.now();
+            }
+            return accumulatedMs();                       // 'up'
+        }
+
+        function pad(n, w = 2) { return String(Math.floor(Math.abs(n))).padStart(w, '0'); }
+
+        function formatTime(ms) {
+            const neg = ms < 0;
+            let v = Math.abs(ms);
+            // Countdowns round UP so a fresh 15:00 reads 15:00 for a full second and
+            // only reaches 00:00 when the time is genuinely gone. Anything counting
+            // up — the chronometer, and overtime past zero — rounds down instead, so
+            // it shows -00:00 for the first second rather than jumping to -00:01.
+            const t = state.format.tenths;
+            const div = t ? 100 : 1000;
+            v = (isCountdown() && !neg) ? Math.ceil(v / div) : Math.floor(v / div);
+            const total = t ? Math.floor(v / 10) : v;
+            const tenth = t ? (v % 10) : 0;
+            const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), s = total % 60;
+            const unit = state.format.unit;
+            let out;
+            if (unit === 'hms' || (unit === 'auto' && h > 0)) out = pad(h) + ':' + pad(m) + ':' + pad(s);
+            // Forced MM:SS must fold the hours into the minutes (1h05 -> 65:00),
+            // never drop them (which would read 05:00 and look like it restarted).
+            else out = pad(Math.floor(total / 60)) + ':' + pad(s);
+            if (t) out += '.' + tenth;
+            return (neg ? '-' : '') + out;
+        }
+
+        /* ================================================================
+           Look
+           ================================================================ */
+        function normalizeHex(h) {
+            h = (h || '').trim();
+            if (h[0] !== '#') h = '#' + h;
+            if (/^#[0-9a-f]{3}$/i.test(h)) h = '#' + h.slice(1).split('').map(c => c + c).join('');
+            return /^#[0-9a-f]{6}$/i.test(h) ? h.toUpperCase() : '#000000';
+        }
+        function hexToRgb(h) { h = normalizeHex(h).slice(1); return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16) }; }
+        function rgbToHex(r, g, b) { const t = n => ('0' + Math.max(0, Math.min(255, n | 0)).toString(16)).slice(-2); return ('#' + t(r) + t(g) + t(b)).toUpperCase(); }
+        function rgba(hex, a) { const c = hexToRgb(hex); return `rgba(${c.r},${c.g},${c.b},${a})`; }
+
+        /* ---- font names: OBS speaks GDI, the browser speaks typographic --------
+           A font file carries two family names. OBS's font dialog shows the legacy
+           Win32/GDI one ("Pricedown Bl", "Segoe UI Bl"), while CSS matches the
+           typographic family ("Pricedown"). Chromium only honours the second, so a
+           name copied from OBS silently falls back to Arial mid-stream.
+           Fix: strip the legacy style suffix and put EVERY candidate in the CSS
+           stack — the browser then picks whichever one really exists, and the panel
+           tells you which name won.                                                */
+        const GDI_SUFFIX = /[\s_-]+(Bl|Blk|Black|Bd|Bold|It|Ital|Italic|Obl|Oblique|Lt|Light|Md|Med|Medium|Rg|Reg|Regular|Hv|Heavy|SemiBold|SemiBd|Smbd|DemiBold|DemiBd|ExtraBold|XBold|ExtraLight|Thin|Cond|Condensed|Narrow|Ultra|Book|Display|Text)$/i;
+
+        function fontVariants(name) {
+            const n = (name || '').trim();
+            if (!n) return [];
+            const out = [n];
+            const push = v => { v = (v || '').trim(); if (v && !out.includes(v)) out.push(v); };
+            let s = n;
+            while (GDI_SUFFIX.test(s)) { s = s.replace(GDI_SUFFIX, '').trim(); push(s); }
+            push(n.split('-')[0]);                     // "PricedownBl-Regular" -> "PricedownBl"
+            return out;
+        }
+
+        // Which of the candidate names the machine can actually render, or null.
+        function resolveFont(name) {
+            for (const v of fontVariants(name)) if (fontAvailable(v)) return v;
+            return null;
+        }
+
+        function fontStack(name) {
+            const list = fontVariants(name).map(v => `"${v}"`).join(', ');
+            return (list ? list + ', ' : '') + `'Segoe UI', Arial, sans-serif`;
+        }
+
+        // Widest digit for the fixed-width cells, measured in the actual font so
+        // condensed faces don't get padded like wide ones.
+        const measureCtx = document.createElement('canvas').getContext('2d');
+        function digitWidthEm(look) {
+            try {
+                measureCtx.font = `${look.weight} 100px ${fontStack(look.font)}`;
+                let w = 0;
+                for (let i = 0; i < 10; i++) w = Math.max(w, measureCtx.measureText(String(i)).width);
+                if (w > 0) return (w / 100).toFixed(3);
+            } catch (e) { /* ignore */ }
+            return '0.62';
+        }
+
+        function applyLook() {
+            const L = state.look, r = document.documentElement.style;
+            r.setProperty('--t-font', fontStack(L.font));
+            r.setProperty('--t-size', L.size + 'px');
+            r.setProperty('--t-weight', L.weight);
+            r.setProperty('--t-letter', L.letter + 'px');
+            r.setProperty('--t-color', L.color);
+            r.setProperty('--t-stroke', L.stroke.on && L.stroke.width > 0 ? `${L.stroke.width}px ${L.stroke.color}` : '0');
+            r.setProperty('--t-shadow', L.shadow.on ? `${L.shadow.x}px ${L.shadow.y}px ${L.shadow.blur}px ${L.shadow.color}` : 'none');
+            r.setProperty('--t-box-bg', L.box.on ? rgba(L.box.color, L.box.alpha) : 'transparent');
+            r.setProperty('--t-box-pad', (L.box.on ? L.box.pad : 0) + 'px');
+            r.setProperty('--t-box-radius', L.box.radius + 'px');
+            r.setProperty('--t-label-size', L.label.size + 'px');
+            r.setProperty('--t-label-color', L.label.color);
+            r.setProperty('--t-label-gap', L.label.gap + 'px');
+            r.setProperty('--digit-w', digitWidthEm(L) + 'em');
+
+            const above = $('[data-label-above]'), below = $('[data-label-below]');
+            const txt = L.label.text || '';
+            if (above) above.textContent = (L.label.pos === 'above') ? txt : '';
+            if (below) below.textContent = (L.label.pos === 'below') ? txt : '';
+        }
+
+        /* ================================================================
+           Display tick
+           ================================================================ */
+        const elTimer = $('[data-timer]');
+        const elInner = $('[data-inner]');
+        let lastText = null, lastOpacity = null, lastColor = null, tickTimer = null;
+
+        // What the overlay should show right now, derived purely from timestamps —
+        // which is why a refresh mid-fade resumes the fade instead of restarting it.
+        function frame() {
+            const ms = remainingMs();
+            const over = -ms;                       // ms past zero (countdowns only)
+            if (!isCountdown() || over < 0) {
+                return { text: formatTime(Math.max(0, ms)), digits: true, opacity: 1, color: null };
+            }
+            const E = state.end;
+            switch (E.action) {
+                case 'overtime':
+                    return { text: formatTime(ms), digits: true, opacity: 1, color: E.overtimeColor };
+                case 'freeze':
+                    return { text: formatTime(0), digits: true, opacity: 1, color: null };
+                case 'hide': {
+                    const o = E.fadeMs > 0 ? Math.max(0, 1 - over / E.fadeMs) : 0;
+                    return { text: formatTime(0), digits: true, opacity: o, color: null };
+                }
+                case 'message':
+                    return { text: E.text, digits: false, opacity: 1, color: null };
+                case 'message-then-hide':
+                default: {
+                    const hold = E.holdSec * 1000;
+                    const o = over <= hold ? 1
+                        : (E.fadeMs > 0 ? Math.max(0, 1 - (over - hold) / E.fadeMs) : 0);
+                    return { text: E.text, digits: false, opacity: o, color: null };
+                }
+            }
+        }
+
+        function renderText(text, digits) {
+            if (!elTimer) return;
+            if (!digits || !state.format.fixedDigits) { elTimer.textContent = text; return; }
+            // Each glyph in its own fixed-width cell: no wobble, whatever the font.
+            let html = '';
+            for (const ch of text) {
+                html += /\d/.test(ch)
+                    ? '<span class="d">' + ch + '</span>'
+                    : '<span class="s">' + (ch === '<' ? '&lt;' : ch === '&' ? '&amp;' : ch) + '</span>';
+            }
+            elTimer.innerHTML = html;
+        }
+
+        function tick() {
+            const f = frame();
+            if (f.text !== lastText) { renderText(f.text, f.digits); lastText = f.text; }
+            const op = Math.round(f.opacity * 100) / 100;
+            if (op !== lastOpacity && elInner) { elInner.style.opacity = op; lastOpacity = op; }
+            const col = f.color || state.look.color;
+            if (col !== lastColor && elTimer) {
+                elTimer.style.color = col; lastColor = col;
+            }
+            if (IS_PANEL) tickPanel();
+        }
+
+        function restartTicker() {
+            if (tickTimer) clearInterval(tickTimer);
+            tickTimer = setInterval(tick, state.format.tenths ? 50 : 100);
+        }
+
+        /* ================================================================
+           Heartbeat — proves display and panel really share storage
+           ================================================================ */
+        if (IS_DISPLAY) {
+            const beat = () => { try { localStorage.setItem(HB_KEY, String(Date.now())); } catch (e) { } };
+            beat();
+            setInterval(beat, HB_MS);
+            // A browser tab sitting behind OBS gets its timers throttled, so beat
+            // again the moment it comes back to the front instead of looking dead.
+            document.addEventListener('visibilitychange', beat);
+        }
+
+        /* ================================================================
+           URL parameters (applied once at load, then persisted)
+           ================================================================ */
+        function parseClock(s) {                     // "15:00" | "1:02:03" | "900" -> seconds
+            const v = (s || '').trim();
+            if (/^\d+$/.test(v)) return +v;
+            const p = v.split(':').map(Number);
+            if (p.some(isNaN) || p.length < 2 || p.length > 3) return null;
+            return p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1];
+        }
+        function secToClock(sec) {
+            const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+            return (h > 0 ? pad(h) + ':' : '') + pad(m) + ':' + pad(s);
+        }
+
+        function applyParams() {
+            let touched = false;
+            const P = (k) => PARAMS.get(k);
+            const has = (k) => PARAMS.has(k);
+            const num = (k, min, max) => { const n = parseFloat(P(k)); return isNaN(n) ? null : Math.min(max, Math.max(min, n)); };
+            const set = (fn) => { fn(); touched = true; };
+
+            if (has('mode') && ['down', 'up', 'target'].includes(P('mode'))) set(() => state.mode = P('mode'));
+            if (has('duration')) { const s = parseClock(P('duration')); if (s != null) set(() => state.duration = s); }
+            if (has('at')) set(() => state.target.time = P('at'));
+            if (has('date')) set(() => state.target.date = P('date'));
+            if (has('format') && ['auto', 'ms', 'hms'].includes(P('format'))) set(() => state.format.unit = P('format'));
+            if (has('tenths')) set(() => state.format.tenths = P('tenths') !== '0');
+            if (has('color')) set(() => state.look.color = normalizeHex(P('color')));
+            if (has('font')) set(() => state.look.font = P('font'));
+            if (has('size')) { const n = num('size', 10, 900); if (n) set(() => state.look.size = n); }
+            if (has('weight')) { const n = num('weight', 100, 900); if (n) set(() => state.look.weight = n); }
+            if (has('letter')) { const n = num('letter', -50, 200); if (n != null) set(() => state.look.letter = n); }
+            if (has('label')) set(() => state.look.label.text = P('label'));
+            if (has('labelpos') && ['above', 'below'].includes(P('labelpos'))) set(() => state.look.label.pos = P('labelpos'));
+            if (has('labelsize')) { const n = num('labelsize', 8, 400); if (n) set(() => state.look.label.size = n); }
+            if (has('end') && ['freeze', 'message', 'message-then-hide', 'hide', 'overtime'].includes(P('end'))) set(() => state.end.action = P('end'));
+            if (has('endtext')) set(() => state.end.text = P('endtext'));
+            if (has('hold')) { const n = num('hold', 0, 3600); if (n != null) set(() => state.end.holdSec = n); }
+            if (has('fade')) { const n = num('fade', 0, 20000); if (n != null) set(() => state.end.fadeMs = n); }
+            if (has('box')) set(() => state.look.box.on = P('box') !== '0');
+            if (has('boxcolor')) set(() => state.look.box.color = normalizeHex(P('boxcolor')));
+            if (has('boxalpha')) { const n = num('boxalpha', 0, 1); if (n != null) set(() => state.look.box.alpha = n); }
+
+            // autostart resets and starts: pair it with "Refresh browser when scene
+            // becomes active" and the countdown restarts every time you enter the scene.
+            if (has('autostart') && P('autostart') !== '0' && state.mode !== 'target') {
+                set(() => state.run = { running: true, since: Date.now(), base: 0 });
+            }
+            if (touched) saveState();
+        }
+
+        /* ================================================================
+           Transport
+           ================================================================ */
+        function toggleRun() {
+            if (state.mode === 'target') return;          // wall-clock target runs itself
+            const r = state.run;
+            if (r.running) { r.base = accumulatedMs(); r.running = false; r.since = 0; }
+            else { r.since = Date.now(); r.running = true; }
+            saveState();
+        }
+
+        function resetRun() {
+            if (state.mode === 'target') {
+                // Re-resolve the hour (rolls to the next occurrence if it just passed).
+                saveState();
+                return;
+            }
+            state.run = { running: false, since: 0, base: 0 };
+            saveState();
+        }
+
+        function adjust(deltaSec) {
+            if (state.mode === 'down') {
+                state.duration = Math.max(0, state.duration + deltaSec);
+            } else if (state.mode === 'up') {
+                // Shifting base is safe while running: elapsed = base + (now - since).
+                state.run.base = Math.max(0, state.run.base + deltaSec * 1000);
+            } else {
+                const t = targetEpoch();
+                if (t == null) return;
+                const d = new Date(t + deltaSec * 1000);
+                state.target.time = pad(d.getHours()) + ':' + pad(d.getMinutes());
+                if (state.target.date) {
+                    state.target.date = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+                }
+            }
+            saveState();
+        }
+
+        function quickSet(mins) {
+            if (state.mode === 'target') {
+                const d = new Date(Date.now() + mins * 60000);
+                state.target.time = pad(d.getHours()) + ':' + pad(d.getMinutes());
+                state.target.date = '';
+            } else {
+                state.mode = 'down';
+                state.duration = mins * 60;
+                state.run = { running: false, since: 0, base: 0 };
+            }
+            saveState();
+        }
+
+        /* ================================================================
+           Panel
+           ================================================================ */
+        const SYS_FONTS = [
+            'Bahnschrift', 'Bahnschrift Condensed', 'Bahnschrift SemiBold', 'Arial', 'Arial Black',
+            'Impact', 'Segoe UI', 'Segoe UI Black', 'Segoe UI Semibold', 'Segoe UI Variable Display',
+            'Franklin Gothic Medium', 'Century Gothic', 'Tahoma', 'Trebuchet MS', 'Verdana',
+            'Calibri', 'Candara', 'Corbel', 'Consolas', 'Cascadia Mono', 'Cascadia Code',
+            'Lucida Console', 'Lucida Sans Unicode', 'Georgia', 'Times New Roman', 'Courier New',
+            'Rockwell', 'Gill Sans MT', 'Sitka Display', 'Palatino Linotype', 'Ebrima', 'Leelawadee UI'
+        ];
+        const COLOR_PALETTE = ['#FFFFFF', '#000000', '#FFD400', '#FF8A00', '#FF3B01', '#D60000',
+            '#E6007E', '#B0E906', '#01C853', '#004C40', '#82B1FF', '#3150F6',
+            '#1D2182', '#9AA0C2', '#5A5A5A', '#111111'];
+
+        // document.fonts.check() lies about local families; comparing rendered widths
+        // against the generic fallbacks is the reliable test.
+        const fontCache = new Map();
+        function fontAvailable(name) {
+            const n = (name || '').trim();
+            if (!n) return false;
+            if (/^(sans-serif|serif|monospace|system-ui|cursive|fantasy)$/i.test(n)) return true;
+            if (fontCache.has(n)) return fontCache.get(n);
+            const probe = 'mmmwwwiiill0123456789WM';
+            const ok = ['monospace', 'serif', 'sans-serif'].some(base => {
+                measureCtx.font = '72px ' + base;
+                const w0 = measureCtx.measureText(probe).width;
+                measureCtx.font = `72px "${n}", ${base}`;
+                const w1 = measureCtx.measureText(probe).width;
+                return Math.abs(w1 - w0) > 0.5;
+            });
+            fontCache.set(n, ok);
+            return ok;
+        }
+
+        function setVal(sel, v) {                      // never clobber what's being typed
+            const el = $(sel);
+            if (el && document.activeElement !== el && el.value !== String(v)) el.value = v;
+        }
+        function setChk(sel, v) { const el = $(sel); if (el) el.checked = !!v; }
+        function setSwatch(sel, hex) { const el = $(sel); if (el) el.style.background = hex; }
+        function bind(sel, fn) {
+            const el = $(sel); if (!el) return;
+            const h = () => fn(el.value, el);
+            el.addEventListener('input', h);
+            el.addEventListener('change', h);
+        }
+        function click(sel, fn) { const el = $(sel); if (el) el.addEventListener('click', fn); }
+
+        function syncSegs() {
+            $$('[data-seg]').forEach(group => {
+                const cur = String(getPath(group.dataset.seg));
+                $$('button', group).forEach(b => b.classList.toggle('on', b.dataset.val === cur));
+            });
+        }
+
+        function syncPanel() {
+            if (!IS_PANEL) return;
+            const L = state.look, E = state.end;
+
+            syncSegs();
+            $$('[data-when]').forEach(el => el.classList.toggle('hidden', el.dataset.when !== state.mode));
+
+            const tog = $('[data-toggle]');
+            if (tog) {
+                if (state.mode === 'target') {
+                    tog.textContent = '⏱ Corre sola';
+                    tog.disabled = true;
+                    tog.classList.remove('go', 'stop');
+                } else {
+                    tog.disabled = false;
+                    tog.textContent = state.run.running ? '⏸ Pausar' : '▶ Iniciar';
+                    tog.classList.toggle('go', !state.run.running);
+                    tog.classList.toggle('stop', state.run.running);
+                }
+            }
+            const th = $('[data-transport-hint]');
+            if (th) th.textContent = state.mode === 'target'
+                ? 'La hora objetivo se calcula contra el reloj del PC: no se pausa. Reset vuelve a resolver la hora.'
+                : 'Espacio = iniciar/pausar · R = reset';
+
+            setVal('[data-duration]', secToClock(state.duration));
+            setVal('[data-target-time]', state.target.time);
+            setVal('[data-target-date]', state.target.date);
+            setChk('[data-tenths]', state.format.tenths);
+            setChk('[data-fixed]', state.format.fixedDigits);
+
+            setVal('[data-end-text]', E.text);
+            setVal('[data-end-hold]', E.holdSec);
+            setVal('[data-end-fade]', E.fadeMs);
+            setSwatch('[data-sw="end.overtimeColor"]', E.overtimeColor);
+
+            setVal('[data-font]', L.font);
+            const fi = $('[data-font]');
+            if (fi) fi.style.fontFamily = fontStack(L.font);
+            showFontStatus(L.font);
+            setVal('[data-size]', L.size); setVal('[data-size-n]', L.size);
+            setVal('[data-letter]', L.letter);
+            const le = $('[data-letter-echo]'); if (le) le.textContent = L.letter + 'px';
+            setSwatch('[data-sw="look.color"]', L.color);
+            setChk('[data-stroke-on]', L.stroke.on);
+            setVal('[data-stroke-w]', L.stroke.width);
+            const se = $('[data-stroke-echo]'); if (se) se.textContent = L.stroke.width + 'px';
+            setSwatch('[data-sw="look.stroke.color"]', L.stroke.color);
+            setChk('[data-shadow-on]', L.shadow.on);
+            setVal('[data-shadow-blur]', L.shadow.blur);
+            setVal('[data-shadow-x]', L.shadow.x);
+            setVal('[data-shadow-y]', L.shadow.y);
+            setSwatch('[data-sw="look.shadow.color"]', L.shadow.color);
+
+            setChk('[data-box-on]', L.box.on);
+            setSwatch('[data-sw="look.box.color"]', L.box.color);
+            setVal('[data-box-alpha]', Math.round(L.box.alpha * 100));
+            const ba = $('[data-box-alpha-echo]'); if (ba) ba.textContent = Math.round(L.box.alpha * 100) + '%';
+            setVal('[data-box-pad]', L.box.pad);
+            setVal('[data-box-radius]', L.box.radius);
+
+            setVal('[data-label-text]', L.label.text);
+            setVal('[data-label-size]', L.label.size);
+            setSwatch('[data-sw="look.label.color"]', L.label.color);
+
+            fitPreview();
+        }
+
+        // Scale the live overlay down into the preview box. offsetWidth/Height are
+        // layout sizes, unaffected by the transform we're about to (re)apply.
+        function fitPreview() {
+            if (VIEW !== 'control' || !elInner) return;
+            const frame = $('[data-preview-frame]');
+            if (!frame) return;
+            elInner.style.transform = 'scale(1)';
+            const w = elInner.offsetWidth, h = elInner.offsetHeight;
+            if (!w || !h) return;
+            const s = Math.min(1, (frame.clientWidth - 20) / w, (frame.clientHeight - 20) / h);
+            elInner.style.transform = 'scale(' + (s > 0 ? s : 1) + ')';
+        }
+        window.addEventListener('resize', fitPreview);
+
+        let lastEcho = '';
+        function tickPanel() {
+            // Duration echo + resolved target datetime: a wrong day-roll must be
+            // visible in the panel before it is visible on stream.
+            const de = $('[data-duration-echo]');
+            if (de && state.mode === 'down') de.textContent = '= ' + state.duration + ' s';
+
+            const te = $('[data-target-echo]');
+            if (te && state.mode === 'target') {
+                const t = targetEpoch();
+                let txt;
+                if (t == null) txt = '⚠ Hora no válida — usa HH:MM (p. ej. 21:30).';
+                else {
+                    const d = new Date(t), left = Math.max(0, t - Date.now());
+                    txt = 'Objetivo: ' + d.toLocaleString('es-ES', {
+                        weekday: 'long', day: '2-digit', month: '2-digit',
+                        hour: '2-digit', minute: '2-digit'
+                    }) + ' · faltan ' + secToClock(Math.floor(left / 1000));
+                }
+                if (txt !== lastEcho) { te.textContent = txt; lastEcho = txt; }
+            }
+
+            // Inline mode hides the whole preview section (the overlay is right above
+            // the panel, in the same document), so there is no heartbeat to report.
+            const hb = VIEW === 'inline' ? null : $('[data-hb]');
+            const hint = $('[data-hb-hint]');
+            if (hb) {
+                // Three states, not two: a display that answered once and then went
+                // quiet is almost always a browser tab parked behind OBS (Chrome
+                // throttles its timers), which is very different from never finding
+                // one — and calling that "no detecto el display" would send the
+                // operator chasing a sync problem that isn't there.
+                let age = null, seen = false;
+                try {
+                    const v = localStorage.getItem(HB_KEY);
+                    if (v) { seen = true; age = Date.now() - +v; }
+                } catch (e) { /* ignore */ }
+                const live = seen && age < HB_MS * 3;
+                hb.textContent = live ? '● display conectado'
+                    : seen ? '◐ display en segundo plano'
+                        : '○ no detecto el display';
+                hb.className = 'hb ' + (live ? 'ok' : seen ? 'idle' : 'bad');
+                if (hint) {
+                    hint.textContent = live
+                        ? 'El display responde: los cambios llegan a OBS en menos de medio segundo.'
+                        : seen
+                            ? 'El display existe pero lleva ' + Math.round(age / 1000) + ' s sin dar señal. Es lo normal si es una pestaña detrás de OBS: el navegador la ralentiza, y el tiempo sigue siendo correcto. Si estaba en OBS y la fuente está visible, refréscala.'
+                            : 'Abre el display (timer.html?panel=off, o sin parámetros) en OBS o en otra pestaña. Si sigue sin detectarlo, este navegador no comparte almacenamiento entre páginas file:// — pon la vista inline (timer.html sin parámetros) como Browser Source y recorta el panel en OBS.';
+                }
+            }
+        }
+
+        /* ---- wiring ------------------------------------------------------ */
+        function wirePanel() {
+            $$('[data-seg]').forEach(group => {
+                const path = group.dataset.seg;
+                $$('button', group).forEach(b => b.addEventListener('click', () => {
+                    let v = b.dataset.val;
+                    if (/^\d+$/.test(v)) v = +v;
+                    setPath(path, v);
+                    if (path === 'format.unit' || path === 'mode') { /* nothing extra */ }
+                    saveState();
+                    if (path === 'mode') restartTicker();
+                }));
+            });
+
+            click('[data-toggle]', toggleRun);
+            click('[data-reset]', resetRun);
+            $$('[data-adj]').forEach(b => b.addEventListener('click', () => adjust(+b.dataset.adj)));
+            $$('[data-quick]').forEach(b => b.addEventListener('click', () => quickSet(+b.dataset.quick)));
+
+            bind('[data-duration]', v => { const s = parseClock(v); if (s != null) { state.duration = s; saveState(); } });
+            bind('[data-target-time]', v => { state.target.time = v.trim(); saveState(); });
+            bind('[data-target-date]', v => { state.target.date = v.trim(); saveState(); });
+            click('[data-date-clear]', () => { state.target.date = ''; saveState(); });
+
+            bind('[data-tenths]', () => { state.format.tenths = $('[data-tenths]').checked; saveState(); restartTicker(); });
+            bind('[data-fixed]', () => { state.format.fixedDigits = $('[data-fixed]').checked; lastText = null; saveState(); });
+
+            bind('[data-end-text]', v => { state.end.text = v; lastText = null; saveState(); });
+            bind('[data-end-hold]', v => { const n = parseFloat(v); if (!isNaN(n)) { state.end.holdSec = Math.max(0, n); saveState(); } });
+            bind('[data-end-fade]', v => { const n = parseFloat(v); if (!isNaN(n)) { state.end.fadeMs = Math.max(0, n); saveState(); } });
+
+            let rememberTimer = null;
+            bind('[data-font]', v => {
+                state.look.font = v;
+                const el = $('[data-font]');
+                if (el) el.style.fontFamily = fontStack(v);   // type it and see it
+                showFontStatus(v);
+                // Only remember the name once typing settles: mid-word fragments can
+                // resolve too ("Pricedown" while typing "Pricedown Bl") and would
+                // clutter the picker with half-typed duplicates.
+                clearTimeout(rememberTimer);
+                rememberTimer = setTimeout(() => rememberFont(state.look.font), 700);
+                saveState();
+            });
+            bind('[data-size]', v => { state.look.size = +v; saveState(); });
+            bind('[data-size-n]', v => { const n = parseFloat(v); if (!isNaN(n)) { state.look.size = Math.max(10, Math.min(900, n)); saveState(); } });
+            bind('[data-letter]', v => { state.look.letter = +v; saveState(); });
+            bind('[data-stroke-on]', () => { state.look.stroke.on = $('[data-stroke-on]').checked; saveState(); });
+            bind('[data-stroke-w]', v => { state.look.stroke.width = +v; saveState(); });
+            bind('[data-shadow-on]', () => { state.look.shadow.on = $('[data-shadow-on]').checked; saveState(); });
+            bind('[data-shadow-blur]', v => { state.look.shadow.blur = +v; saveState(); });
+            bind('[data-shadow-x]', v => { state.look.shadow.x = +v || 0; saveState(); });
+            bind('[data-shadow-y]', v => { state.look.shadow.y = +v || 0; saveState(); });
+
+            bind('[data-box-on]', () => { state.look.box.on = $('[data-box-on]').checked; saveState(); });
+            bind('[data-box-alpha]', v => { state.look.box.alpha = (+v) / 100; saveState(); });
+            bind('[data-box-pad]', v => { state.look.box.pad = +v; saveState(); });
+            bind('[data-box-radius]', v => { state.look.box.radius = +v; saveState(); });
+
+            bind('[data-label-text]', v => { state.look.label.text = v; saveState(); });
+            bind('[data-label-size]', v => { state.look.label.size = +v; saveState(); });
+
+            $$('[data-sw]').forEach(b => b.addEventListener('click', () => openColorModal(b.dataset.sw)));
+            click('[data-color-close]', closeColorModal);
+            $('[data-color-modal]').addEventListener('click', e => { if (e.target === $('[data-color-modal]')) closeColorModal(); });
+            bind('[data-color-hex]', v => setColorFromHex(v));
+            ['r', 'g', 'b'].forEach(c => bind('[data-rgb-' + c + ']', setColorFromSliders));
+
+            click('[data-font-open]', openFontModal);
+            click('[data-font-detect]', detectLocalFonts);
+            bind('[data-font-search]', renderFontList);
+            click('[data-font-close]', () => $('[data-font-modal]').classList.add('hidden'));
+            $('[data-font-modal]').addEventListener('click', e => { if (e.target === $('[data-font-modal]')) $('[data-font-modal]').classList.add('hidden'); });
+
+            click('[data-preset-save]', savePreset);
+            click('[data-preset-export]', exportPresets);
+            click('[data-preset-import]', importPresets);
+            click('[data-copy-url]', copyDisplayUrl);
+            // Inline is the default view, so this button offers whichever view you
+            // are NOT currently in.
+            const swap = $('[data-open-inline]');
+            if (swap) {
+                swap.textContent = (VIEW === 'inline') ? 'Abrir solo el display' : 'Abrir modo inline';
+                swap.addEventListener('click', () => {
+                    const u = new URL(location.href);
+                    u.searchParams.delete('control');
+                    if (VIEW === 'inline') u.searchParams.set('panel', 'off');
+                    else u.searchParams.delete('panel');
+                    location.href = u.toString();
+                });
+            }
+            click('[data-reset-all]', () => {
+                state = defaultState();
+                saveState(); restartTicker();
+            });
+
+            // Keyboard transport — ignored while typing in a field.
+            document.addEventListener('keydown', e => {
+                const t = e.target.tagName;
+                if (t === 'INPUT' || t === 'TEXTAREA') return;
+                if (e.code === 'Space') { e.preventDefault(); toggleRun(); }
+                else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); resetRun(); }
+            });
+
+            // The bare-overlay URL for OBS: no panel to crop.
+            const u = new URL(location.href);
+            u.searchParams.delete('control');
+            u.searchParams.set('panel', 'off');
+            setVal('[data-display-url]', u.toString());
+
+            const si = $('[data-sync-info]');
+            if (si) {
+                si.textContent = (VIEW === 'inline'
+                    ? 'Vista inline (la de por defecto): overlay y panel en el mismo documento, así que no hay nada que pueda desincronizarse. En OBS, recorta esta zona inferior. '
+                    : 'Panel suelto: manda sobre el display por localStorage. ')
+                    + 'Timer «' + ID + '» · estado en ' + KEY + ' · '
+                    + (channel ? 'BroadcastChannel activo' : 'sin BroadcastChannel (origen file://): sincroniza por sondeo cada '
+                        + POLL_MS + ' ms') + '.';
+            }
+        }
+
+        function copyDisplayUrl() {
+            const el = $('[data-display-url]');
+            if (!el) return;
+            el.select(); el.setSelectionRange(0, 99999);
+            let ok = false;
+            try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+            if (!ok && navigator.clipboard) { try { navigator.clipboard.writeText(el.value); ok = true; } catch (e) { } }
+            const b = $('[data-copy-url]');
+            if (b) { b.textContent = ok ? '¡Copiada!' : 'Copia a mano'; setTimeout(() => b.textContent = 'Copiar', 1500); }
+        }
+
+        /* ---- color modal (no <input type=color>: invisible inside OBS) ---- */
+        let colorPath = 'look.color';
+        const COLOR_LABELS = {
+            'look.color': 'Color del tiempo', 'look.stroke.color': 'Color del contorno',
+            'look.shadow.color': 'Color de la sombra', 'look.box.color': 'Color de la caja',
+            'look.label.color': 'Color de la etiqueta', 'end.overtimeColor': 'Color del tiempo extra'
+        };
+        function openColorModal(path) {
+            colorPath = path;
+            $('[data-color-title]').textContent = COLOR_LABELS[path] || 'Color';
+            buildPalette();
+            loadColorControls(getPath(path) || '#000000');
+            $('[data-color-modal]').classList.remove('hidden');
+        }
+        function closeColorModal() { $('[data-color-modal]').classList.add('hidden'); }
+        function loadColorControls(hex) {
+            hex = normalizeHex(hex);
+            $('[data-color-preview]').style.background = hex;
+            setVal('[data-color-hex]', hex);
+            const { r, g, b } = hexToRgb(hex);
+            $('[data-rgb-r]').value = r; $('[data-rgb-g]').value = g; $('[data-rgb-b]').value = b;
+        }
+        function applyColor(hex) {
+            hex = normalizeHex(hex);
+            setPath(colorPath, hex);
+            $('[data-color-preview]').style.background = hex;
+            lastColor = null;                   // force the display to repaint
+            saveState();
+        }
+        function setColorFromHex(v) {
+            if (!/^#?[0-9a-f]{6}$/i.test((v || '').trim())) return;
+            const hex = normalizeHex(v), { r, g, b } = hexToRgb(hex);
+            $('[data-rgb-r]').value = r; $('[data-rgb-g]').value = g; $('[data-rgb-b]').value = b;
+            applyColor(hex);
+        }
+        function setColorFromSliders() {
+            const hex = rgbToHex(+$('[data-rgb-r]').value, +$('[data-rgb-g]').value, +$('[data-rgb-b]').value);
+            setVal('[data-color-hex]', hex);
+            applyColor(hex);
+        }
+        function buildPalette() {
+            const wrap = $('[data-color-palette]'); if (!wrap) return;
+            wrap.innerHTML = '';
+            COLOR_PALETTE.forEach(c => {
+                const b = document.createElement('button');
+                b.className = 'pal'; b.style.background = c; b.title = c;
+                b.addEventListener('click', () => { loadColorControls(c); applyColor(c); });
+                wrap.appendChild(b);
+            });
+        }
+
+        /* ---- font status + modal ----------------------------------------- */
+        // Every font that turns out to be usable is remembered, so a family typed by
+        // hand once (or found by the detector) shows up in the list from then on —
+        // including inside OBS, where the detector's permission prompt cannot appear.
+        function extraFonts() {
+            try { return JSON.parse(localStorage.getItem(FONTS_KEY) || '[]') || []; }
+            catch (e) { return []; }
+        }
+        function rememberFont(name) {
+            const n = (name || '').trim();
+            if (!n || !resolveFont(n)) return;
+            const list = extraFonts();
+            if (list.includes(n)) return;
+            list.push(n);
+            try { localStorage.setItem(FONTS_KEY, JSON.stringify(list)); } catch (e) { /* ignore */ }
+        }
+
+        function showFontStatus(name) {
+            const el = $('[data-font-status]'); if (!el) return;
+            const n = (name || '').trim();
+            const used = resolveFont(n);
+            if (!n) { el.textContent = ''; el.className = 'fstatus'; return; }
+            if (used === n) { el.textContent = '✓ instalada'; el.className = 'fstatus ok'; }
+            else if (used) {
+                // The OBS-name case: tell the operator which name actually rendered.
+                el.textContent = '↪ se usará «' + used + '» (así la llama el navegador)';
+                el.className = 'fstatus alt';
+            } else { el.textContent = '⚠ no instalada en este PC'; el.className = 'fstatus bad'; }
+        }
+
+        function fontRows() {
+            const seen = new Set(), rows = [];
+            [...extraFonts(), ...SYS_FONTS].forEach(f => {
+                const k = f.toLowerCase();
+                if (seen.has(k)) return;
+                seen.add(k);
+                rows.push({ f, ok: !!resolveFont(f) });
+            });
+            return rows.sort((a, b) => (b.ok - a.ok) || a.f.localeCompare(b.f));
+        }
+
+        function openFontModal() {
+            renderFontList();
+            $('[data-font-modal]').classList.remove('hidden');
+        }
+
+        function renderFontList() {
+            const list = $('[data-font-list]'); if (!list) return;
+            const q = ($('[data-font-search]')?.value || '').trim().toLowerCase();
+            list.innerHTML = '';
+            const rows = fontRows().filter(r => !q || r.f.toLowerCase().includes(q));
+            if (!rows.length) {
+                list.innerHTML = '<span class="hint">Nada coincide. Escribe el nombre directamente en el campo «Fuente».</span>';
+                return;
+            }
+            rows.forEach(({ f, ok }) => {
+                const b = document.createElement('button');
+                b.className = 'font-item' + (ok ? '' : ' off');
+                b.style.fontFamily = fontStack(f);
+                b.innerHTML = '<span>' + f + ' 12:34</span><small>' + (ok ? '✓ instalada' : '⚠ no instalada') + '</small>';
+                b.addEventListener('click', () => {
+                    state.look.font = f;
+                    rememberFont(f);
+                    $('[data-font-modal]').classList.add('hidden');
+                    saveState();
+                });
+                list.appendChild(b);
+            });
+        }
+
+        // queryLocalFonts() needs a permission the operator must grant, and it is
+        // normally refused inside OBS — so this is a button, not a boot step, and a
+        // refusal has to say so plainly instead of looking like "no fonts installed".
+        async function detectLocalFonts() {
+            const msg = $('[data-font-msg]');
+            const say = (t) => { if (msg) msg.textContent = t; };
+            if (!window.queryLocalFonts) {
+                say('Este navegador no puede listar las fuentes del sistema. Escribe el nombre a mano en «Fuente»: si funciona, se añade sola a esta lista.');
+                return;
+            }
+            say('Pidiendo permiso al navegador…');
+            try {
+                const fonts = await window.queryLocalFonts();
+                if (!fonts.length) {
+                    say('El navegador no dio acceso a las fuentes (normal dentro de OBS). Ábreme en Chrome/Edge y pulsa otra vez, o escribe el nombre a mano.');
+                    return;
+                }
+                const fams = [...new Set(fonts.map(f => f.family))];
+                const merged = [...new Set([...extraFonts(), ...fams])].sort((a, b) => a.localeCompare(b));
+                try { localStorage.setItem(FONTS_KEY, JSON.stringify(merged)); } catch (e) { /* ignore */ }
+                fontCache.clear();
+                say(fams.length + ' familias detectadas y guardadas. Ya aparecen aquí también dentro de OBS.');
+                renderFontList();
+            } catch (e) {
+                say('Permiso denegado (' + (e && e.name ? e.name : 'error') + '). Escribe el nombre a mano en «Fuente».');
+            }
+        }
+
+        /* ---- presets (look + format only, shared across every id) -------- */
+        function loadPresets() {
+            try { return JSON.parse(localStorage.getItem(PRESET_KEY) || '{}') || {}; } catch (e) { return {}; }
+        }
+        function storePresets(p) {
+            try { localStorage.setItem(PRESET_KEY, JSON.stringify(p)); } catch (e) { }
+            renderPresets();
+        }
+        function savePreset() {
+            const el = $('[data-preset-name]');
+            const name = (el.value || '').trim();
+            if (!name) { el.focus(); return; }
+            const p = loadPresets();
+            p[name] = { look: JSON.parse(JSON.stringify(state.look)), format: JSON.parse(JSON.stringify(state.format)) };
+            el.value = '';
+            storePresets(p);
+        }
+        function renderPresets() {
+            const wrap = $('[data-preset-list]'); if (!wrap) return;
+            const p = loadPresets();
+            const names = Object.keys(p).sort();
+            wrap.innerHTML = '';
+            if (!names.length) {
+                wrap.innerHTML = '<span class="hint">Sin presets guardados todavía.</span>';
+                return;
+            }
+            names.forEach(n => {
+                const chip = document.createElement('span');
+                chip.className = 'preset-chip';
+                const load = document.createElement('button');
+                load.textContent = n;
+                load.addEventListener('click', () => {
+                    state.look = merge(defaultState().look, p[n].look);
+                    state.format = merge(defaultState().format, p[n].format);
+                    lastText = null; lastColor = null;
+                    saveState(); restartTicker();
+                });
+                const del = document.createElement('button');
+                del.textContent = '✕';
+                del.addEventListener('click', () => { const q = loadPresets(); delete q[n]; storePresets(q); });
+                chip.appendChild(load); chip.appendChild(del);
+                wrap.appendChild(chip);
+            });
+        }
+        function exportPresets() {
+            const ta = $('[data-preset-json]');
+            ta.classList.remove('hidden');
+            ta.value = JSON.stringify(loadPresets(), null, 2);
+            ta.select();
+        }
+        function importPresets() {
+            const ta = $('[data-preset-json]');
+            if (ta.classList.contains('hidden') || !ta.value.trim()) {
+                ta.classList.remove('hidden'); ta.focus(); return;
+            }
+            try {
+                const incoming = JSON.parse(ta.value);
+                storePresets(Object.assign(loadPresets(), incoming));
+                ta.classList.add('hidden'); ta.value = '';
+            } catch (e) {
+                ta.value = '// JSON no válido\n' + ta.value;
+            }
+        }
+
+        /* ================================================================
+           Boot
+           ================================================================ */
+        applyParams();
+        applyLook();
+
+        if (VIEW === 'control') {
+            // The panel drives a real, live instance of the overlay as its preview.
+            const frame = $('[data-preview-frame]');
+            if (frame) frame.appendChild($('#stage'));
+        }
+        if (IS_PANEL) { wirePanel(); renderPresets(); syncPanel(); }
+
+        restartTicker();
+        tick();
+        setTimeout(fitPreview, 60);        // after fonts settle
+    </script>
 </body>
 
 </html>
-<style>
-    * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-    }
-
-    * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-        background-color: transparent;
-        background: transparent;
-    }
-    
-    body {
-        height: 100vh;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        /* Fondo oscuro para facilitar eliminar en OBS */
-        font-family: 'Arial', sans-serif;
-        /* Fuente moderna y simple */
-    }
-
-    .timer-container {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        height: 100%;
-        width: 100%;
-        /* background-color: #1a1a1a; */
-    }
-
-    .timer-text {
-        font-weight: bolder;
-        font-size: 120px;
-        color: white;
-        text-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
-        border: 4px solid rgba(0, 0, 0, 0.6);
-        /* Borde del texto */
-        padding: 20px;
-        border-radius: 10px;
-        text-align: center;
-    }
-</style>
-<script>
-    let minutes = 15; // Cambia esta variable según el tiempo en minutos que quieras mostrar
-    let seconds = minutes * 60; // Se convierte a segundos
-
-    const timerElement = document.getElementById("timer");
-
-    function startTimer() {
-        setInterval(() => {
-            let min = Math.floor(seconds / 60);
-            let sec = seconds % 60;
-
-            // Formatear el texto para mostrar dos dígitos en minutos y segundos
-            timerElement.innerText = `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
-
-            // Decrementar el tiempo
-            if (seconds > 0) {
-                seconds--;
-            } else {
-                clearInterval(); // Detener el temporizador cuando llegue a cero
-            }
-        }, 1000);
-    }
-
-    // Comenzar el temporizador
-    startTimer();
-
-</script>
