@@ -26,6 +26,16 @@
                     "color": "#ffffff"
                 },
                 {
+                    "id": "btn-iw6ta1",
+                    "label": "AGP LOBBY",
+                    "icon": "🏝",
+                    "action": {
+                        "type": "obs.scene",
+                        "scene": "AGP LOBBY"
+                    },
+                    "color": "#f88fff"
+                },
+                {
                     "id": "btn-fj7q4a",
                     "label": "FUSHIBOL REACT",
                     "icon": "⚽",
@@ -690,16 +700,6 @@
                     }
                 },
                 {
-                    "id": "jc-terminando",
-                    "label": "TERMINANDO",
-                    "icon": "🏁",
-                    "color": "#828282",
-                    "action": {
-                        "type": "obs.scene",
-                        "scene": "JC TERMINANDO"
-                    }
-                },
-                {
                     "id": "btn-t6sr4w",
                     "label": "EMPEZANDO",
                     "icon": "⏳",
@@ -848,13 +848,14 @@
                     }
                 },
                 {
-                    "type": "spacer"
-                },
-                {
-                    "type": "spacer"
-                },
-                {
-                    "type": "spacer"
+                    "id": "jc-terminando",
+                    "label": "TERMINANDO",
+                    "icon": "🏁",
+                    "color": "#828282",
+                    "action": {
+                        "type": "obs.scene",
+                        "scene": "JC TERMINANDO"
+                    }
                 },
                 {
                     "id": "btn-d5xxrs",
@@ -1022,7 +1023,7 @@
                 {
                     "id": "open-studio",
                     "label": "YT Studio",
-                    "icon": "🎥",
+                    "icon": "🔴",
                     "action": {
                         "type": "launch.url",
                         "url": "https://studio.youtube.com/channel/UC2EP1I0KW1SoeS8-C0wLMOQ/livestreaming"
@@ -1040,7 +1041,13 @@
                     "color": "#4dff00"
                 },
                 {
-                    "type": "spacer"
+                    "id": "btn-58jqfv",
+                    "label": "Twitch Panel",
+                    "icon": "🟣",
+                    "action": {
+                        "type": "launch.url",
+                        "url": "https://dashboard.twitch.tv/u/jeczzu_/stream-manager"
+                    }
                 },
                 {
                     "id": "btn-grzuma",
@@ -1122,6 +1129,17 @@
                         "keys": "alt+6"
                     }
                 }
+            ]
+        },
+        {
+            "id": "apps",
+            "label": "Apps",
+            "grid": { "cols": 4, "rows": 2 },
+            "buttons": [
+                { "id": "app-chat", "label": "Chat Multi", "icon": "💬", "color": "#7c3aed",
+                "action": { "type": "launch.app", "path": "D:\\pc JESUS\\Videos de Jeczzu\\chat-overlay-multistream\\start-server.bat" } },
+                { "id": "app-obs", "label": "OBS", "icon": "🎥", "color": "#1f2937",
+                "action": { "type": "launch.app", "path": "D:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe", "cwd": "D:\\Program Files\\obs-studio\\bin\\64bit" } }
             ]
         }
     ]
