@@ -84,6 +84,7 @@ dispatcher.register('obs.filter', (action) => obsClient.setFilter(action.source,
 dispatcher.register('obs.mute', (action) => obsClient.setMute(action.input, action.mute));
 dispatcher.register('obs.stream', (action) => obsClient.stream(action.op));
 dispatcher.register('obs.record', (action) => obsClient.record(action.op));
+dispatcher.register('obs.media', (action) => obsClient.media(action.input, action.op));
 dispatcher.register('obs.raw', (action) => obsClient.raw(action.request, action.params));
 registerMacroHandler(dispatcher);
 

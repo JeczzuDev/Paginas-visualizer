@@ -99,6 +99,7 @@ const ACTION_LABELS = {
     'obs.mute': 'OBS · Silenciar audio',
     'obs.stream': 'OBS · Transmisión',
     'obs.record': 'OBS · Grabación',
+    'obs.media': 'OBS · Media (play/pausa)',
     'obs.raw': 'OBS · Petición cruda',
     'keys.hotkey': 'Teclado · Atajo',
     'keys.text': 'Teclado · Escribir texto',
@@ -117,6 +118,7 @@ function defaultAction(type) {
         case 'obs.mute': return { type, input: '', mute: 'toggle' };
         case 'obs.stream': return { type, op: 'toggle' };
         case 'obs.record': return { type, op: 'toggle' };
+        case 'obs.media': return { type, input: '', op: 'playpause' };
         case 'obs.raw': return { type, request: '' };
         case 'keys.hotkey': return { type, keys: '' };
         case 'keys.text': return { type, text: '' };
@@ -138,6 +140,7 @@ function actionSummary(action) {
         case 'obs.mute': return `${action.input || '?'}`;
         case 'obs.stream': return `stream: ${action.op}`;
         case 'obs.record': return `rec: ${action.op}`;
+        case 'obs.media': return `${action.input || '?'}: ${action.op}`;
         case 'keys.hotkey': return action.keys || '?';
         case 'keys.text': return `"${action.text || ''}"`;
         case 'media': return action.key;
@@ -163,6 +166,10 @@ function allSources() {
     for (const list of Object.values(obs.sceneSources)) for (const s of list) set.add(s);
     for (const i of obs.inputs) set.add(i.name);
     return [...set].sort();
+}
+/* media/VLC sources, for the play-pause dropdown */
+function mediaInputs() {
+    return obs.inputs.filter((i) => /ffmpeg|vlc/i.test(i.kind)).map((i) => i.name);
 }
 
 /* ------------------------------------------------------------------ */
@@ -521,6 +528,19 @@ function renderActionFields(action) {
         case 'obs.stream':
         case 'obs.record':
             box.append(field('Operación', selectInput(action.op, [['toggle', 'Alternar'], ['start', 'Iniciar'], ['stop', 'Detener']], (v) => { action.op = v; markDirty(); })));
+            break;
+
+        case 'obs.media':
+            box.append(field('Fuente de media', comboInput(action.input, mediaInputs(), (v) => { action.input = v; markDirty(); renderButtons(); })));
+            box.append(field('Operación', selectInput(action.op, [
+                ['playpause', 'Play / Pausa (alternar)'],
+                ['play', 'Play'],
+                ['pause', 'Pausa'],
+                ['restart', 'Reiniciar'],
+                ['stop', 'Detener'],
+                ['next', 'Siguiente'],
+                ['previous', 'Anterior']
+            ], (v) => { action.op = v; markDirty(); renderButtons(); })));
             break;
 
         case 'obs.raw':

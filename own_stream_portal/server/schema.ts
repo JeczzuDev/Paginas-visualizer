@@ -50,6 +50,13 @@ const obsRecord = z.object({
     op: startStopToggle.default('toggle')
 });
 
+/* Control an OBS media/VLC source (play, pause, restart, next…). */
+const obsMedia = z.object({
+    type: z.literal('obs.media'),
+    input: z.string().min(1),
+    op: z.enum(['playpause', 'play', 'pause', 'restart', 'stop', 'next', 'previous']).default('playpause')
+});
+
 /* Escape hatch: any obs-websocket v5 request by name. */
 const obsRaw = z.object({
     type: z.literal('obs.raw'),
@@ -98,6 +105,7 @@ const simpleActionSchema = z.discriminatedUnion('type', [
     obsMute,
     obsStream,
     obsRecord,
+    obsMedia,
     obsRaw,
     keysHotkey,
     keysText,
@@ -128,6 +136,7 @@ export const actionSchema = z.discriminatedUnion('type', [
     obsMute,
     obsStream,
     obsRecord,
+    obsMedia,
     obsRaw,
     keysHotkey,
     keysText,
